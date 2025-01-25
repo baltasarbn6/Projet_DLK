@@ -5,7 +5,7 @@ import os
 from bs4 import BeautifulSoup
 
 # Charger les variables d'environnement
-load_dotenv()
+load_dotenv(dotenv_path="/opt/airflow/.env")
 
 GENIUS_ACCESS_TOKEN = os.getenv("GENIUS_ACCESS_TOKEN")
 AWS_ACCESS_KEY_ID = os.getenv("AWS_ACCESS_KEY_ID")
@@ -147,7 +147,12 @@ def process_artists(file_path):
     """
     Récupère les données pour une liste d'artistes à partir d'un fichier.
     """
-    with open(file_path, "r", encoding="utf-8") as f:
+    full_path = os.path.join("/opt/airflow/scripts", file_path)
+    if not os.path.exists(full_path):
+        print(f"Le fichier {full_path} est introuvable.")
+        return
+
+    with open(full_path, "r", encoding="utf-8") as f:
         artists = [line.strip() for line in f.readlines()]
 
     for artist_name in artists:

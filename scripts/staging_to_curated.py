@@ -5,7 +5,7 @@ from dotenv import load_dotenv
 from random import seed, sample
 
 # Charger les variables d'environnement
-load_dotenv()
+load_dotenv(dotenv_path="/opt/airflow/.env")
 seed(42)  # Fixer une graine pour des résultats reproductibles
 
 # Configuration MySQL
@@ -16,7 +16,7 @@ MYSQL_DATABASE = os.getenv("MYSQL_DATABASE")
 MYSQL_PORT = int(os.getenv("MYSQL_PORT", 3306))
 
 # Configuration MongoDB
-MONGO_URI = "mongodb://localhost:27017/"
+MONGO_URI = "mongodb://mongodb-dlk:27017/"
 MONGO_DATABASE = "datalakes_curated"
 
 # Connexion à MySQL

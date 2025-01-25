@@ -1,6 +1,7 @@
 version: '3.8'
 
 services:
+  # Service MySQL (Datalake)
   mysql-dlk:
     image: mysql:latest
     container_name: mysql-dlk
@@ -11,12 +12,14 @@ services:
       MYSQL_USER: datalakes_user
       MYSQL_PASSWORD: securepassword
     ports:
-      - "3307:3306"
+      - "3306:3306"
     volumes:
       - mysql_data:/var/lib/mysql
+      - ./sql/init.sql:/docker-entrypoint-initdb.d/init.sql
     networks:
       - dlk-network
 
+  # Service MongoDB
   mongodb-dlk:
     image: mongo:latest
     container_name: mongodb-dlk
@@ -28,6 +31,7 @@ services:
     networks:
       - dlk-network
 
+  # Interface Web MongoDB
   mongo-express:
     image: mongo-express:latest
     container_name: mongo-express-dlk
@@ -42,9 +46,110 @@ services:
     networks:
       - dlk-network
 
+  # PostgreSQL pour Airflow
+  postgres:
+    image: postgres:13
+    container_name: postgres
+    environment:
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: airflow
+      POSTGRES_DB: airflow
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - dlk-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U airflow"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Initialisation de la base de données Airflow
+  airflow-init:
+    build:
+      context: .
+    image: airflow-custom
+    container_name: airflow-init
+    depends_on:
+      - postgres
+    environment:
+      AIRFLOW__CORE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow
+      _AIRFLOW_DB_UPGRADE: "true"
+      _AIRFLOW_WWW_USER_CREATE: "true"
+      _AIRFLOW_WWW_USER_USERNAME: "airflow"
+      _AIRFLOW_WWW_USER_PASSWORD: "airflow"
+    command: "airflow db init"
+    volumes:
+      - ./dags:/opt/airflow/dags
+      - ./logs:/opt/airflow/logs
+      - ./plugins:/opt/airflow/plugins
+      - ./scripts:/opt/airflow/scripts
+      - ./.env:/opt/airflow/.env
+    networks:
+      - dlk-network
+    restart: "no"
+
+  # Airflow Webserver
+  airflow-webserver:
+    build:
+      context: .
+    image: airflow-custom
+    container_name: airflow-webserver
+    depends_on:
+      airflow-init:
+        condition: service_healthy
+    environment:
+      AIRFLOW__CORE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__WEBSERVER__SECRET_KEY: your_secret_key_here
+    volumes:
+      - ./dags:/opt/airflow/dags
+      - ./logs:/opt/airflow/logs
+      - ./plugins:/opt/airflow/plugins
+      - ./scripts:/opt/airflow/scripts
+      - ./.env:/opt/airflow/.env
+    ports:
+      - "8080:8080"
+    command: webserver
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    networks:
+      - dlk-network
+
+  # Airflow Scheduler
+  airflow-scheduler:
+    build:
+      context: .
+    image: airflow-custom
+    container_name: airflow-scheduler
+    depends_on:
+      airflow-init:
+        condition: service_healthy
+    environment:
+      AIRFLOW__CORE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+    volumes:
+      - ./dags:/opt/airflow/dags
+      - ./logs:/opt/airflow/logs
+      - ./plugins:/opt/airflow/plugins
+      - ./scripts:/opt/airflow/scripts
+      - ./.env:/opt/airflow/.env
+    command: scheduler
+    networks:
+      - dlk-network
+
 volumes:
   mysql_data:
   mongodb_data:
+  postgres_data:
+  airflow_dags:
+  airflow_logs:
+  airflow_plugins:
 
 networks:
   dlk-network:

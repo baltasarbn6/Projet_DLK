@@ -5,7 +5,7 @@ import os
 import re
 
 # Charger les variables d'environnement
-load_dotenv()
+load_dotenv(dotenv_path="/opt/airflow/.env")
 
 # Configuration S3
 AWS_ACCESS_KEY_ID = os.getenv("AWS_ACCESS_KEY_ID")
