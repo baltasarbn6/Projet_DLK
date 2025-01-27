@@ -73,7 +73,8 @@ services:
     image: airflow-custom
     container_name: airflow-init
     depends_on:
-      - postgres
+      postgres:
+        condition: service_healthy
     environment:
       AIRFLOW__CORE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow
       _AIRFLOW_DB_UPGRADE: "true"
@@ -142,6 +143,32 @@ services:
     command: scheduler
     networks:
       - dlk-network
+
+  # API Gateway
+  api-gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    container_name: api-gateway
+    environment:
+      - MYSQL_HOST=mysql-dlk
+      - MYSQL_USER=datalakes_user
+      - MYSQL_PASSWORD=securepassword
+      - MYSQL_DATABASE=datalakes_staging
+      - MYSQL_PORT=3306
+      - MONGO_URI=mongodb://mongodb-dlk:27017/
+      - MONGO_DATABASE=datalakes_curated
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+      - AWS_REGION=${AWS_REGION}
+      - BUCKET_NAME=${BUCKET_NAME}
+    ports:
+      - "8000:8000"
+    networks:
+      - dlk-network
+    depends_on:
+      - mysql-dlk
+      - mongodb-dlk
 
 volumes:
   mysql_data:
