@@ -60,11 +60,6 @@ services:
       - postgres_data:/var/lib/postgresql/data
     networks:
       - dlk-network
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U airflow"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
 
   # Initialisation de la base de données Airflow
   airflow-init:
@@ -73,8 +68,7 @@ services:
     image: airflow-custom
     container_name: airflow-init
     depends_on:
-      postgres:
-        condition: service_healthy
+      - postgres
     environment:
       AIRFLOW__CORE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow
       _AIRFLOW_DB_UPGRADE: "true"
@@ -99,12 +93,13 @@ services:
     image: airflow-custom
     container_name: airflow-webserver
     depends_on:
-      airflow-init:
-        condition: service_healthy
+      - airflow-init
     environment:
-      AIRFLOW__CORE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow
       AIRFLOW__CORE__EXECUTOR: LocalExecutor
       AIRFLOW__WEBSERVER__SECRET_KEY: your_secret_key_here
+      AIRFLOW__WEBSERVER__WEB_SERVER_WORKERS: 4
+      AIRFLOW__WEBSERVER__WEB_SERVER_TIMEOUT: 600
     volumes:
       - ./dags:/opt/airflow/dags
       - ./logs:/opt/airflow/logs
@@ -113,12 +108,7 @@ services:
       - ./.env:/opt/airflow/.env
     ports:
       - "8080:8080"
-    command: webserver
-    healthcheck:
-      test: ["CMD", "curl", "--fail", "http://localhost:8080/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
+    command: ["airflow", "webserver"]
     networks:
       - dlk-network
 
@@ -129,8 +119,7 @@ services:
     image: airflow-custom
     container_name: airflow-scheduler
     depends_on:
-      airflow-init:
-        condition: service_healthy
+      - airflow-init
     environment:
       AIRFLOW__CORE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow
       AIRFLOW__CORE__EXECUTOR: LocalExecutor

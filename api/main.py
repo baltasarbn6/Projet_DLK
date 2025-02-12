@@ -1,4 +1,5 @@
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 import pymysql
 import pymongo
 import boto3
@@ -47,7 +48,26 @@ s3_client = boto3.client(
 # Initialiser l'application FastAPI
 app = FastAPI()
 
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173"],  # Remplace par "*" si besoin
+    allow_credentials=True,
+    allow_methods=["*"],  # Autorise toutes les méthodes (GET, POST, PUT, DELETE)
+    allow_headers=["*"],  # Autorise tous les headers
+)
 
+@app.get("/get-s3-url/")
+async def get_s3_url(file_key: str):
+    try:
+        url = s3_client.generate_presigned_url(
+            "get_object",
+            Params={"Bucket": BUCKET_NAME, "Key": file_key},
+            ExpiresIn=3600,  # Lien valide pendant 1 heure
+        )
+        return {"url": url}
+    except Exception as e:
+        return {"error": str(e)}
+    
 @app.get("/")
 async def root():
     """Route par défaut."""
