@@ -1,8 +1,9 @@
 import requests
 import boto3
-from dotenv import load_dotenv
+import json
 import os
 from bs4 import BeautifulSoup
+from dotenv import load_dotenv
 
 # Charger les variables d'environnement
 load_dotenv(dotenv_path="/opt/airflow/.env")
@@ -23,142 +24,119 @@ s3_client = boto3.client(
 
 BASE_URL = "https://api.genius.com"
 
+def request_genius(endpoint, params=None):
+    """Effectue une requête à l'API Genius et gère les erreurs."""
+    headers = {"Authorization": f"Bearer {GENIUS_ACCESS_TOKEN}"}
+    response = requests.get(f"{BASE_URL}{endpoint}", headers=headers, params=params)
+
+    if response.status_code == 200:
+        return response.json()
+    else:
+        print(f"Erreur API ({response.status_code}) : {response.text}")
+        return None
 
 def get_artist_id(artist_name):
-    """
-    Recherche l'ID d'un artiste sur Genius.
-    """
-    url = f"{BASE_URL}/search"
-    headers = {"Authorization": f"Bearer {GENIUS_ACCESS_TOKEN}"}
-    params = {"q": artist_name}
-    response = requests.get(url, headers=headers, params=params)
-    if response.status_code == 200:
-        data = response.json()
-        for hit in data["response"]["hits"]:
-            if hit["result"]["primary_artist"]["name"].lower() == artist_name.lower():
-                return hit["result"]["primary_artist"]["id"]
-        print(f"Aucun ID trouvé pour l'artiste : {artist_name}")
-    else:
-        print(f"Erreur lors de la recherche de l'artiste {artist_name}: {response.status_code}")
+    """Recherche l'ID d'un artiste sur Genius."""
+    data = request_genius("/search", {"q": artist_name})
+    if not data:
+        return None
+
+    for hit in data["response"]["hits"]:
+        if hit["result"]["primary_artist"]["name"].lower() == artist_name.lower():
+            return hit["result"]["primary_artist"]["id"]
+
+    print(f"Aucun match exact pour {artist_name}.")
     return None
 
-
 def get_artist_details(artist_id):
-    """
-    Récupère les informations d'un artiste.
-    """
-    url = f"{BASE_URL}/artists/{artist_id}"
-    headers = {"Authorization": f"Bearer {GENIUS_ACCESS_TOKEN}"}
-    response = requests.get(url, headers=headers)
-    if response.status_code == 200:
-        data = response.json()["response"]["artist"]
-        return {
-            "name": data["name"],
-            "image_url": data["image_url"],
-            "bio": data.get("description", {}).get("plain", None),
-        }
-    else:
-        print(f"Erreur lors de la récupération des informations de l'artiste : {response.status_code}")
+    """Récupère les informations d'un artiste."""
+    data = request_genius(f"/artists/{artist_id}")
+    if not data:
         return None
 
+    artist = data["response"]["artist"]
+    
+    bio_text = ""
+    if "description" in artist and "dom" in artist["description"]:
+        for item in artist["description"]["dom"].get("children", []):
+            if isinstance(item, dict) and "children" in item:
+                bio_text += "".join([c if isinstance(c, str) else "" for c in item["children"]])
 
-def download_image(image_url, key):
-    """
-    Télécharge une image depuis une URL et la téléverse sur S3.
-    """
-    try:
-        response = requests.get(image_url, stream=True)
-        if response.status_code == 200:
-            s3_client.put_object(
-                Bucket=BUCKET_NAME, Key=key, Body=response.content, ContentType="image/jpeg"
-            )
-            print(f"Téléversement réussi pour l'image sous la clé {key}")
-            return key
-        else:
-            print(f"Erreur lors du téléchargement de l'image : {response.status_code}")
-            return None
-    except Exception as e:
-        print(f"Erreur lors du téléchargement de l'image : {str(e)}")
-        return None
-
+    return {
+        "name": artist["name"],
+        "image_url": artist["image_url"],
+        "bio": bio_text.strip(),
+    }
 
 def get_popular_songs_by_artist(artist_id):
-    """
-    Récupère les chansons populaires d'un artiste.
-    """
-    url = f"{BASE_URL}/artists/{artist_id}/songs"
-    headers = {"Authorization": f"Bearer {GENIUS_ACCESS_TOKEN}"}
-    params = {"sort": "popularity", "per_page": 10}
-    response = requests.get(url, headers=headers, params=params)
-    if response.status_code == 200:
-        return response.json()["response"]["songs"]
-    else:
-        print(f"Erreur lors de la récupération des chansons populaires : {response.status_code}")
+    """Récupère les chansons populaires d'un artiste."""
+    data = request_genius(f"/artists/{artist_id}/songs", {"sort": "popularity", "per_page": 10})
+    if not data:
         return []
 
+    songs = []
+    for song in data["response"]["songs"]:
+        songs.append({
+            "id": song["id"],
+            "title": song["title"],
+            "url": song["url"],
+            "song_art_image_url": song["song_art_image_url"]
+        })
+    return songs
+
+def get_song_details(song_id):
+    """Récupère les détails d'une chanson spécifique."""
+    data = request_genius(f"/songs/{song_id}")
+    if not data:
+        return None
+
+    song = data["response"]["song"]
+    
+    return {
+        "title": song["title"],
+        "url": song["url"],
+        "image_url": song["song_art_image_url"],
+        "language": song.get("language", "unknown"),
+        "release_date": song.get("release_date", "unknown"),
+        "pageviews": song["stats"].get("pageviews", 0)
+    }
 
 def get_song_lyrics(song_url):
-    """
-    Scrape les paroles depuis une URL Genius.
-    """
+    """Scrape les paroles d'une chanson depuis Genius."""
     response = requests.get(song_url)
-    if response.status_code == 200:
-        soup = BeautifulSoup(response.text, "html.parser")
-        lyrics_divs = soup.find_all("div", {"data-lyrics-container": "true"})
-        lyrics = "\n".join(div.get_text(separator="\n") for div in lyrics_divs)
-        return lyrics.strip() if lyrics else "Paroles indisponibles"
-    else:
-        return f"Erreur lors de la récupération des paroles : {response.status_code}"
+    if response.status_code != 200:
+        return f"Erreur lors du scraping : {response.status_code}"
 
+    soup = BeautifulSoup(response.text, "html.parser")
+    lyrics_divs = soup.find_all("div", {"data-lyrics-container": "true"})
+    lyrics = "\n".join(div.get_text(separator="\n") for div in lyrics_divs)
 
-def upload_artist_data_to_s3(artist_name, artist_details, songs, artist_image_key):
-    """
-    Téléverse les informations de l'artiste et de ses chansons populaires sur S3.
-    """
-    content = f"Informations sur {artist_name} :\n"
-    content += f"Nom : {artist_details['name']}\n"
-    content += f"Biographie : {artist_details['bio'] if artist_details['bio'] else 'Biographie non disponible'}\n"
-    content += f"Image S3 Key : {artist_image_key}\n\n"
-    content += "Chansons populaires :\n"
+    return lyrics.strip() if lyrics else "Paroles indisponibles"
 
-    for song in songs:
-        # Téléverser l'image de la chanson sur S3
-        song_image_key = f"raw/{artist_name.replace(' ', '_').lower()}_{song['title'].replace(' ', '_').lower()}_image.jpg"
-        download_image(song["song_art_image_url"], song_image_key)
-
-        # Récupérer les paroles
-        lyrics = get_song_lyrics(song["url"])
-
-        # Ajouter les informations de la chanson au contenu
-        content += f"- {song['title']} (URL : {song['url']})\n"
-        content += f"  Image S3 Key : {song_image_key}\n"
-        content += f"  Paroles :\n{lyrics}\n\n"
-
-    # Téléverser les données de l'artiste et des chansons sur S3
-    s3_key = f"raw/{artist_name.replace(' ', '_').lower()}_popular_songs.txt"
+def upload_to_s3(key, content):
+    """Téléverse du contenu JSON sur S3."""
     try:
-        s3_client.put_object(Bucket=BUCKET_NAME, Key=s3_key, Body=content)
-        print(f"Téléversement réussi pour {artist_name} sous la clé {s3_key}")
+        s3_client.put_object(
+            Bucket=BUCKET_NAME, Key=key, 
+            Body=json.dumps(content, ensure_ascii=False, indent=4).encode("utf-8"),
+            ContentType="application/json"
+        )
+        print(f"Téléversement réussi : {key}")
     except Exception as e:
-        print(f"Erreur lors du téléversement des données de {artist_name} : {str(e)}")
-
+        print(f"Erreur lors du téléversement sur S3 : {str(e)}")
 
 def process_artists(file_path):
-    """
-    Récupère les données pour une liste d'artistes à partir d'un fichier.
-    """
-    full_path = os.path.join("/opt/airflow/scripts", file_path)
-    if not os.path.exists(full_path):
-        print(f"Le fichier {full_path} est introuvable.")
+    """Traite une liste d'artistes et enregistre les données sur S3."""
+    if not os.path.exists(file_path):
+        print(f"Le fichier {file_path} est introuvable.")
         return
 
-    with open(full_path, "r", encoding="utf-8") as f:
+    with open(file_path, "r", encoding="utf-8") as f:
         artists = [line.strip() for line in f.readlines()]
 
     for artist_name in artists:
-        print(f"Traitement de l'artiste : {artist_name}")
+        print(f"\nTraitement de l'artiste : {artist_name}")
 
-        # Récupérer l'ID et les détails de l'artiste
         artist_id = get_artist_id(artist_name)
         if not artist_id:
             continue
@@ -167,19 +145,23 @@ def process_artists(file_path):
         if not artist_details:
             continue
 
-        # Télécharger l'image de l'artiste
-        artist_image_key = f"raw/{artist_name.replace(' ', '_').lower()}_image.jpg"
-        download_image(artist_details["image_url"], artist_image_key)
-
-        # Récupérer les chansons populaires
         songs = get_popular_songs_by_artist(artist_id)
-        if not songs:
-            continue
+        song_details = []
+        for song in songs:
+            details = get_song_details(song["id"])
+            if details:
+                details["lyrics"] = get_song_lyrics(details["url"])
+                song_details.append(details)
 
-        # Téléverser les données sur S3
-        upload_artist_data_to_s3(artist_name, artist_details, songs, artist_image_key)
+        artist_data = {
+            "artist": artist_details,
+            "songs": song_details
+        }
 
+        s3_key = f"raw/{artist_name.replace(' ', '_').lower()}.json"
+        upload_to_s3(s3_key, artist_data)
 
-# Exemple d'utilisation
+    print("Données enregistrées sur S3")
+
 if __name__ == "__main__":
-    process_artists("artists.txt")
+    process_artists("/opt/airflow/scripts/artists.txt")

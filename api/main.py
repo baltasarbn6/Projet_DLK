@@ -6,27 +6,22 @@ import boto3
 from dotenv import load_dotenv
 import os
 
-# Charger les variables d'environnement
 load_dotenv(dotenv_path="/opt/api/.env")
 
-# Configuration MySQL
 MYSQL_HOST = os.getenv("MYSQL_HOST")
 MYSQL_USER = os.getenv("MYSQL_USER")
 MYSQL_PASSWORD = os.getenv("MYSQL_PASSWORD")
 MYSQL_DATABASE = os.getenv("MYSQL_DATABASE")
 MYSQL_PORT = int(os.getenv("MYSQL_PORT", 3306))
 
-# Configuration MongoDB
 MONGO_URI = os.getenv("MONGO_URI", "mongodb://mongodb-dlk:27017/")
 MONGO_DATABASE = os.getenv("MONGO_DATABASE", "datalakes_curated")
 
-# Configuration S3
 AWS_ACCESS_KEY_ID = os.getenv("AWS_ACCESS_KEY_ID")
 AWS_SECRET_ACCESS_KEY = os.getenv("AWS_SECRET_ACCESS_KEY")
 AWS_REGION = os.getenv("AWS_REGION")
 BUCKET_NAME = os.getenv("BUCKET_NAME")
 
-# Initialiser les clients
 mysql_connection = pymysql.connect(
     host=MYSQL_HOST,
     user=MYSQL_USER,
@@ -45,61 +40,68 @@ s3_client = boto3.client(
     region_name=AWS_REGION,
 )
 
-# Initialiser l'application FastAPI
 app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],  # Remplace par "*" si besoin
+    allow_origins=["http://localhost:5173"],
     allow_credentials=True,
-    allow_methods=["*"],  # Autorise toutes les méthodes (GET, POST, PUT, DELETE)
-    allow_headers=["*"],  # Autorise tous les headers
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
-@app.get("/get-s3-url/")
-async def get_s3_url(file_key: str):
-    try:
-        url = s3_client.generate_presigned_url(
-            "get_object",
-            Params={"Bucket": BUCKET_NAME, "Key": file_key},
-            ExpiresIn=3600,  # Lien valide pendant 1 heure
-        )
-        return {"url": url}
-    except Exception as e:
-        return {"error": str(e)}
-    
 @app.get("/")
 async def root():
-    """Route par défaut."""
     return {"message": "Bienvenue sur l'API Gateway du projet DLK"}
 
 @app.get("/raw")
 async def get_raw_data():
-    """Accès aux données brutes depuis S3"""
     response = s3_client.list_objects_v2(Bucket=BUCKET_NAME, Prefix="raw/")
     files = [obj["Key"] for obj in response.get("Contents", [])]
     return {"raw_files": files}
 
+@app.get("/raw/{artist_name}")
+async def get_artist_data(artist_name: str):
+    key = f"raw/{artist_name.replace(' ', '_').lower()}.json"
+    try:
+        response = s3_client.get_object(Bucket=BUCKET_NAME, Key=key)
+        artist_data = response["Body"].read().decode("utf-8")
+        return {"artist_data": artist_data}
+    except Exception as e:
+        return {"error": f"Artiste non trouvé ou erreur S3: {str(e)}"}
 
 @app.get("/staging")
 async def get_staging_data():
-    """Accès aux données intermédiaires depuis MySQL"""
     with mysql_connection.cursor() as cursor:
-        cursor.execute("SELECT * FROM datalakes_staging.songs")
+        cursor.execute("SELECT * FROM artists")
+        artists = cursor.fetchall()
+        cursor.execute("SELECT * FROM songs")
         songs = cursor.fetchall()
-    return {"staging_data": songs}
+    return {"artists": artists, "songs": songs}
 
+@app.get("/staging/artists")
+async def get_staging_artists():
+    """Liste les artistes stockés en MySQL."""
+    with mysql_connection.cursor() as cursor:
+        cursor.execute("SELECT id, name, bio FROM artists")
+        artists = cursor.fetchall()
+    return {"artists": artists}
+
+@app.get("/staging/songs")
+async def get_staging_songs():
+    """Liste les chansons stockées en MySQL."""
+    with mysql_connection.cursor() as cursor:
+        cursor.execute("SELECT id, artist_id, title, url, image_url, lyrics FROM songs")
+        songs = cursor.fetchall()
+    return {"songs": songs}
 
 @app.get("/curated")
 async def get_curated_data():
-    """Accès aux données finales depuis MongoDB"""
-    songs = list(mongo_db.songs.find({}, {"_id": 0}))  # Exclure `_id`
+    songs = list(mongo_db.songs.find({}, {"_id": 0}))
     return {"curated_data": songs}
-
 
 @app.get("/health")
 async def get_health_status():
-    """Vérification de l'état des services (MySQL, MongoDB, S3)."""
     service_status = {
         "mysql": {"status": "unhealthy", "details": None},
         "mongodb": {"status": "unhealthy", "details": None},
@@ -107,7 +109,6 @@ async def get_health_status():
     }
 
     try:
-        # Vérification MySQL
         with mysql_connection.cursor() as cursor:
             cursor.execute("SELECT 1")
         service_status["mysql"]["status"] = "healthy"
@@ -115,43 +116,37 @@ async def get_health_status():
         service_status["mysql"]["details"] = str(e)
 
     try:
-        # Vérification MongoDB
         mongo_db.command("ping")
         service_status["mongodb"]["status"] = "healthy"
     except Exception as e:
         service_status["mongodb"]["details"] = str(e)
 
     try:
-        # Vérification S3
         s3_client.head_bucket(Bucket=BUCKET_NAME)
         service_status["s3"]["status"] = "healthy"
     except Exception as e:
         service_status["s3"]["details"] = str(e)
 
-    # Déterminer l'état général
-    overall_status = "healthy" if all(
-        service["status"] == "healthy" for service in service_status.values()
-    ) else "unhealthy"
-
+    overall_status = "healthy" if all(service["status"] == "healthy" for service in service_status.values()) else "unhealthy"
     return {"status": overall_status, "services": service_status}
 
 @app.get("/stats")
 async def get_stats():
-    """Métriques sur le remplissage des buckets et bases de données"""
-    # Stats S3
-    response = s3_client.list_objects_v2(Bucket=BUCKET_NAME)
+    response = s3_client.list_objects_v2(Bucket=BUCKET_NAME, Prefix="raw/")
     s3_file_count = len(response.get("Contents", [])) if "Contents" in response else 0
 
-    # Stats MySQL
     with mysql_connection.cursor() as cursor:
-        cursor.execute("SELECT COUNT(*) as count FROM datalakes_staging.songs")
-        mysql_count = cursor.fetchone()["count"]
+        cursor.execute("SELECT COUNT(*) as count FROM artists")
+        mysql_artists_count = cursor.fetchone()["count"]
 
-    # Stats MongoDB
-    mongo_count = mongo_db.songs.count_documents({})
+        cursor.execute("SELECT COUNT(*) as count FROM songs")
+        mysql_songs_count = cursor.fetchone()["count"]
+
+    mongo_songs_count = mongo_db.songs.count_documents({})
+    mongo_artists_count = mongo_db.songs.distinct("artist")
 
     return {
         "s3_file_count": s3_file_count,
-        "mysql_song_count": mysql_count,
-        "mongo_song_count": mongo_count,
+        "mysql": {"artists_count": mysql_artists_count, "songs_count": mysql_songs_count},
+        "mongodb": {"artists_count": len(mongo_artists_count), "songs_count": mongo_songs_count},
     }

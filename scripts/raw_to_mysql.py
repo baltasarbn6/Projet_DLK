@@ -3,24 +3,21 @@ import pymysql
 from dotenv import load_dotenv
 import os
 import re
+import json
 
-# Charger les variables d'environnement
 load_dotenv(dotenv_path="/opt/airflow/.env")
 
-# Configuration S3
 AWS_ACCESS_KEY_ID = os.getenv("AWS_ACCESS_KEY_ID")
 AWS_SECRET_ACCESS_KEY = os.getenv("AWS_SECRET_ACCESS_KEY")
 AWS_REGION = os.getenv("AWS_REGION")
 BUCKET_NAME = os.getenv("BUCKET_NAME")
 
-# Configuration MySQL
 MYSQL_HOST = os.getenv("MYSQL_HOST")
 MYSQL_USER = os.getenv("MYSQL_USER")
 MYSQL_PASSWORD = os.getenv("MYSQL_PASSWORD")
 MYSQL_DATABASE = os.getenv("MYSQL_DATABASE")
 MYSQL_PORT = int(os.getenv("MYSQL_PORT"))
 
-# Initialisation des clients S3 et MySQL
 s3_client = boto3.client(
     "s3",
     aws_access_key_id=AWS_ACCESS_KEY_ID,
@@ -38,139 +35,63 @@ connection = pymysql.connect(
     cursorclass=pymysql.cursors.DictCursor,
 )
 
-
 def list_raw_files():
-    """
-    Liste tous les fichiers dans le dossier 'raw/' du bucket S3.
-    """
     response = s3_client.list_objects_v2(Bucket=BUCKET_NAME, Prefix="raw/")
-    files = [obj["Key"] for obj in response.get("Contents", []) if obj["Key"].endswith("_popular_songs.txt")]
-    return files
-
+    return [obj["Key"] for obj in response.get("Contents", []) if obj["Key"].endswith(".json")]
 
 def clean_lyrics(raw_lyrics):
-    """
-    Nettoie les paroles :
-    - Supprime le préfixe 'Paroles :' s'il est présent.
-    - Supprime les balises comme [Couplet 1], [Refrain], etc.
-    - Combine les lignes qui appartiennent à la même phrase.
-    - Conserve les dialogues avec les tirets.
-    """
-    # Supprimer le préfixe 'Paroles :'
     raw_lyrics = re.sub(r"^Paroles\s*:", "", raw_lyrics)
-
-    # Supprimer les balises comme [Couplet 1], [Refrain], etc.
     raw_lyrics = re.sub(r"\[.*?\]", "", raw_lyrics)
-
-    cleaned_lyrics = []
-    temp_line = ""
-
-    for line in raw_lyrics.split("\n"):
-        line = line.strip()  # Supprimer les espaces en début et fin de ligne
-
-        if not line:
-            # Ajouter une séparation de paragraphe si une ligne vide est rencontrée
-            if temp_line:
-                cleaned_lyrics.append(temp_line.strip())
-                temp_line = ""
-            continue
-
-        # Si la ligne commence par un tiret (dialogue) ou une majuscule, elle doit être séparée
-        if line.startswith("-") or (temp_line and line[0].isupper() and not temp_line.endswith((".", ":", "?"))):
-            cleaned_lyrics.append(temp_line.strip())
-            temp_line = line
-        else:
-            # Combiner la ligne avec la précédente
-            temp_line += " " + line
-
-    # Ajouter la dernière ligne
-    if temp_line:
-        cleaned_lyrics.append(temp_line.strip())
-
-    return "\n".join(cleaned_lyrics)
-
+    return "\n".join(line.strip() for line in raw_lyrics.split("\n") if line.strip())
 
 def process_file(file_key):
-    """
-    Traite un fichier Raw depuis S3 et insère les données dans MySQL.
-    """
-    # Télécharger le fichier depuis S3
     response = s3_client.get_object(Bucket=BUCKET_NAME, Key=file_key)
     content = response["Body"].read().decode("utf-8")
+    data = json.loads(content)
 
-    # Extraire les données du fichier
-    lines = content.split("\n")
-    artist_name = lines[1].split(": ", 1)[1].strip()
-    bio = lines[2].split(": ", 1)[1].strip()
-    artist_image_key = lines[3].split(": ", 1)[1].strip()
+    artist_name = data["artist"]["name"]
+    bio = data["artist"].get("bio", "Biographie non disponible")
+    artist_image_url = data["artist"]["image_url"]
 
-    # Insérer l'artiste dans MySQL
     with connection.cursor() as cursor:
         cursor.execute(
-            "INSERT INTO artists (name, bio, s3_image_key) VALUES (%s, %s, %s)",
-            (artist_name, bio, artist_image_key),
+            "INSERT INTO artists (name, bio, image_url) VALUES (%s, %s, %s) ON DUPLICATE KEY UPDATE bio=%s, image_url=%s",
+            (artist_name, bio, artist_image_url, bio, artist_image_url),
         )
-        artist_id = cursor.lastrowid
+        cursor.execute("SELECT id FROM artists WHERE name = %s", (artist_name,))
+        artist_id = cursor.fetchone()["id"]
 
-    # Extraire et insérer les chansons
-    i = 5  # Commencer après "Chansons populaires :"
-    while i < len(lines):
-        try:
-            # Vérifier si la ligne contient une chanson
-            if lines[i].startswith("- ") and "(URL :" in lines[i]:
-                # Titre de la chanson
-                title = lines[i].split("(URL")[0].replace("- ", "").strip()
+    for song in data["songs"]:
+        title = song.get("title", "Titre inconnu")
+        url = song.get("url", None)
+        image_url = song.get("image_url", "https://default-image-url.com")
+        language = song.get("language", "unknown")
+        release_date = song.get("release_date", None)
+        pageviews = song.get("pageviews", 0)
 
-                # URL de la chanson
-                url = lines[i].split("URL : ")[1].split(")")[0].strip()
+        raw_lyrics = song.get("lyrics", "Paroles indisponibles")
+        cleaned_lyrics = clean_lyrics(raw_lyrics)
 
-                # Clé S3 de l'image de la chanson
-                image_key = lines[i + 1].split(": ", 1)[1].strip()
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                INSERT INTO songs (artist_id, title, url, image_url, language, release_date, pageviews, lyrics)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                ON DUPLICATE KEY UPDATE url=%s, image_url=%s, language=%s, release_date=%s, pageviews=%s, lyrics=%s
+                """,
+                (artist_id, title, url, image_url, language, release_date, pageviews, cleaned_lyrics,
+                url, image_url, language, release_date, pageviews, cleaned_lyrics),
+            )
 
-                # Paroles brutes
-                lyrics_start = i + 2
-                raw_lyrics = []
-                while lyrics_start < len(lines) and not lines[lyrics_start].startswith("- "):
-                    raw_lyrics.append(lines[lyrics_start])
-                    lyrics_start += 1
-
-                raw_lyrics = "\n".join(raw_lyrics).strip()
-                cleaned_lyrics = clean_lyrics(raw_lyrics)  # Nettoyer les paroles
-
-                # Insérer la chanson dans MySQL
-                with connection.cursor() as cursor:
-                    cursor.execute(
-                        "INSERT INTO songs (artist_id, title, url, s3_image_key, lyrics) VALUES (%s, %s, %s, %s, %s)",
-                        (artist_id, title, url, image_key, cleaned_lyrics),
-                    )
-
-                i = lyrics_start  # Passer à la ligne suivante
-            else:
-                # Ignorer les lignes mal formatées
-                print(f"⚠️ Ligne ignorée : {lines[i]}")
-                i += 1
-        except Exception as e:
-            print(f"❌ Erreur lors du traitement de la chanson à la ligne {i}: {lines[i]}")
-            print(e)
-            i += 1
-
-    # Valider les transactions
     connection.commit()
-    print(f"✅ Données insérées pour l'artiste : {artist_name}")
-
+    print(f"Données insérées pour l'artiste : {artist_name}")
 
 def process_all_files():
-    """
-    Traite tous les fichiers Raw depuis S3 et insère les données dans MySQL.
-    """
     files = list_raw_files()
     print(f"Fichiers trouvés : {len(files)}")
     for file_key in files:
         print(f"Traitement du fichier : {file_key}")
         process_file(file_key)
 
-
 if __name__ == "__main__":
     process_all_files()
-
-
