@@ -132,9 +132,9 @@ def process_artists(file_path):
         return
 
     with open(file_path, "r", encoding="utf-8") as f:
-        artists = [line.strip() for line in f.readlines()]
+        artists_data = json.load(f)
 
-    for artist_name in artists:
+    for artist_name in artists_data.get("artists", []):
         print(f"\nTraitement de l'artiste : {artist_name}")
 
         artist_id = get_artist_id(artist_name)
@@ -164,4 +164,4 @@ def process_artists(file_path):
     print("Données enregistrées sur S3")
 
 if __name__ == "__main__":
-    process_artists("/opt/airflow/scripts/artists.txt")
+    process_artists("/opt/airflow/scripts/artists.json")
