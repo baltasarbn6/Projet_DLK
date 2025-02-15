@@ -6,10 +6,12 @@ import subprocess
 # Chemin des scripts dans le conteneur
 SCRIPT_PATH = "/opt/airflow/scripts"
 
-# Exemple de fonctions Python
-def run_upload_to_s3():
-    """Appelle le script upload_to_s3.py"""
-    subprocess.run(["python", f"{SCRIPT_PATH}/upload_to_s3.py"], check=True)
+def run_upload_to_s3(**kwargs):
+    """Appelle le script upload_to_s3.py en passant les artistes depuis la config."""
+    artists = kwargs.get('dag_run').conf.get('artists', [])
+    if not artists:
+        raise ValueError("Aucun artiste fourni pour l'ingestion")
+    subprocess.run(["python", f"{SCRIPT_PATH}/upload_to_s3.py"] + artists, check=True)
 
 def run_raw_to_mysql():
     """Appelle le script raw_to_mysql.py"""
@@ -31,7 +33,7 @@ default_args = {
 }
 
 dag = DAG(
-    'my_python_scripts_dag',
+    'my_dag',
     default_args=default_args,
     description='DAG pour orchestrer les scripts S3, MySQL et MongoDB',
     schedule_interval=None,
@@ -42,6 +44,7 @@ dag = DAG(
 task1 = PythonOperator(
     task_id='upload_to_s3',
     python_callable=run_upload_to_s3,
+    provide_context=True,
     dag=dag,
 )
 

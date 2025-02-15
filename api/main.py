@@ -1,10 +1,13 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 import pymysql
 import pymongo
 import boto3
 from dotenv import load_dotenv
 import os
+from pydantic import BaseModel
+import requests
+from typing import List
 
 load_dotenv(dotenv_path="/opt/api/.env")
 
@@ -40,6 +43,10 @@ s3_client = boto3.client(
     region_name=AWS_REGION,
 )
 
+AIRFLOW_API_URL = os.getenv("AIRFLOW_API_URL")
+AIRFLOW_API_USER = os.getenv("AIRFLOW_USER")
+AIRFLOW_API_PASS = os.getenv("AIRFLOW_PASSWORD")
+
 app = FastAPI()
 
 app.add_middleware(
@@ -49,6 +56,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+class ArtistRequest(BaseModel):
+    artists: List[str]
 
 @app.get("/")
 async def root():
@@ -150,3 +160,20 @@ async def get_stats():
         "mysql": {"artists_count": mysql_artists_count, "songs_count": mysql_songs_count},
         "mongodb": {"artists_count": len(mongo_artists_count), "songs_count": mongo_songs_count},
     }
+
+@app.post("/ingest")
+async def ingest_data(request: ArtistRequest):
+    if not request.artists:
+        raise HTTPException(status_code=400, detail="Liste d'artistes vide")
+
+    payload = {
+        "conf": {"artists": request.artists}
+    }
+    auth = (AIRFLOW_API_USER, AIRFLOW_API_PASS)
+    headers = {"Content-Type": "application/json"}
+
+    response = requests.post(AIRFLOW_API_URL, auth=auth, headers=headers, json=payload)
+    if response.status_code != 200:
+        raise HTTPException(status_code=500, detail=f"Erreur lors du déclenchement du DAG : {response.text}")
+
+    return {"message": f"Pipeline déclenché avec succès pour {len(request.artists)} artistes."}

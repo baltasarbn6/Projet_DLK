@@ -4,6 +4,7 @@ import json
 import os
 from bs4 import BeautifulSoup
 from dotenv import load_dotenv
+import sys
 
 # Charger les variables d'environnement
 load_dotenv(dotenv_path="/opt/airflow/.env")
@@ -55,7 +56,6 @@ def get_artist_details(artist_id):
         return None
 
     artist = data["response"]["artist"]
-    
     bio_text = ""
     if "description" in artist and "dom" in artist["description"]:
         for item in artist["description"]["dom"].get("children", []):
@@ -125,16 +125,13 @@ def upload_to_s3(key, content):
     except Exception as e:
         print(f"Erreur lors du téléversement sur S3 : {str(e)}")
 
-def process_artists(file_path):
+def process_artists(artists):
     """Traite une liste d'artistes et enregistre les données sur S3."""
-    if not os.path.exists(file_path):
-        print(f"Le fichier {file_path} est introuvable.")
+    if not artists:
+        print("Aucun artiste fourni pour le traitement.")
         return
 
-    with open(file_path, "r", encoding="utf-8") as f:
-        artists_data = json.load(f)
-
-    for artist_name in artists_data.get("artists", []):
+    for artist_name in artists:
         print(f"\nTraitement de l'artiste : {artist_name}")
 
         artist_id = get_artist_id(artist_name)
@@ -164,4 +161,5 @@ def process_artists(file_path):
     print("Données enregistrées sur S3")
 
 if __name__ == "__main__":
-    process_artists("/opt/airflow/scripts/artists.json")
+    artists = sys.argv[1:]
+    process_artists(artists)
