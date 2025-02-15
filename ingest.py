@@ -7,7 +7,7 @@ url = "http://localhost:8080/api/v1/dags/my_dag/dagRuns"
 # Données à envoyer
 data = {
     "conf": {
-        "artists": ["Daniel Balavoine", "Jean-Jacques Goldman", "Christophe Maé"]
+        "artists": ["artist1", "artist2", ...]
     }
 }
 
