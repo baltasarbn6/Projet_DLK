@@ -14,8 +14,9 @@ COPY ./scripts /opt/airflow/scripts
 COPY ./dags /opt/airflow/dags
 COPY ./requirements.txt /requirements.txt
 
-# Modifier le fichier airflow.cfg pour utiliser basic_auth
-RUN sed -i 's/auth_backends = airflow.api.auth.backend.session/auth_backends = airflow.api.auth.backend.basic_auth/' /opt/airflow/airflow.cfg
+# Copier le script spécifique au webserver
+COPY ./scripts/init_webserver.sh /opt/airflow/scripts/init_webserver.sh
+RUN chmod +x /opt/airflow/scripts/init_webserver.sh
 
 # Assurer les bons droits pour l'utilisateur airflow
 RUN chown -R airflow: /opt/airflow
