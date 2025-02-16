@@ -16,7 +16,9 @@ COPY ./requirements.txt /requirements.txt
 
 # Copier le script spécifique au webserver
 COPY ./scripts/init_webserver.sh /opt/airflow/scripts/init_webserver.sh
+COPY ./scripts/init_scheduler.sh /opt/airflow/scripts/init_scheduler.sh
 RUN chmod +x /opt/airflow/scripts/init_webserver.sh
+RUN chmod +x /opt/airflow/scripts/init_scheduler.sh
 
 # Assurer les bons droits pour l'utilisateur airflow
 RUN chown -R airflow: /opt/airflow

@@ -44,8 +44,8 @@ s3_client = boto3.client(
 )
 
 AIRFLOW_API_URL = os.getenv("AIRFLOW_API_URL")
-AIRFLOW_API_USER = os.getenv("AIRFLOW_USER")
-AIRFLOW_API_PASS = os.getenv("AIRFLOW_PASSWORD")
+AIRFLOW_USER = os.getenv("AIRFLOW_USER")
+AIRFLOW_PASSWORD = os.getenv("AIRFLOW_PASSWORD")
 
 app = FastAPI()
 
@@ -169,7 +169,7 @@ async def ingest_data(request: ArtistRequest):
     payload = {
         "conf": {"artists": request.artists}
     }
-    auth = (AIRFLOW_API_USER, AIRFLOW_API_PASS)
+    auth = (AIRFLOW_USER, AIRFLOW_PASSWORD)
     headers = {"Content-Type": "application/json"}
 
     response = requests.post(AIRFLOW_API_URL, auth=auth, headers=headers, json=payload)

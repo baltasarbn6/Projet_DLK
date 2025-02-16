@@ -1,6 +1,6 @@
 FROM python:3.8-slim
 
-# Installer les dépendances système, y compris le client MySQL
+# Installation des dépendances système, y compris le client MySQL
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     python3-dev \
@@ -12,12 +12,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /opt/api
 
 # Copier les fichiers nécessaires
-COPY ./api /opt/api
-COPY ./requirements.txt /requirements.txt
-COPY ./.env /opt/api/.env
+COPY . /opt/api
 
 # Installer les dépendances Python
-RUN pip install --no-cache-dir -r /requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
 
 # Commande par défaut pour démarrer l'API
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
