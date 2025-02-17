@@ -35,48 +35,44 @@ mysql_connection = pymysql.connect(
 mongo_client = pymongo.MongoClient(MONGO_URI)
 mongo_db = mongo_client[MONGO_DATABASE]
 
+# Liste de mots courants à ne pas masquer
+STOP_WORDS = {"le", "la", "les", "un", "une", "des", "et", "mais", "ou", "donc", "or", "ni", "car", "je", "tu", "il", "elle", "on", "nous", "vous", "ils", "elles", "de", "du", "en", "à", "au", "aux", "par", "pour", "avec", "sans", "sous", "sur", "dans", "chez", "vers", "entre", "comme"}
+
 def generate_difficulty_versions(lyrics, easy_pct=10, medium_pct=25, hard_pct=40):
     """
-    Génère trois versions de paroles (facile, intermédiaire, difficile) en masquant un pourcentage de mots
-    tout en conservant les sauts de ligne.
+    Génère trois versions de paroles (facile, intermédiaire, difficile) en masquant un pourcentage de mots,
+    tout en excluant les mots courants définis dans STOP_WORDS.
     """
     def mask_words_in_line(line, percentage):
-        words = line.split()  # Séparer les mots sans toucher aux sauts de ligne
-        if not words:  
-            return line  # Garder les lignes vides
-        total_words = len(words)
-        num_to_mask = max(1, int(total_words * percentage / 100))
-        mask_indices = sample(range(total_words), num_to_mask)
+        words = line.split()
+        if not words:
+            return line
+        maskable_indices = [i for i, w in enumerate(words) if w.lower() not in STOP_WORDS]
+        num_to_mask = max(1, int(len(maskable_indices) * percentage / 100))
+        mask_indices = sample(maskable_indices, min(len(maskable_indices), num_to_mask))
         return " ".join("____" if i in mask_indices else word for i, word in enumerate(words))
 
-    # Diviser les paroles en lignes et appliquer le masquage mot par mot
     easy = "\n".join(mask_words_in_line(line, easy_pct) for line in lyrics.splitlines())
     medium = "\n".join(mask_words_in_line(line, medium_pct) for line in lyrics.splitlines())
     hard = "\n".join(mask_words_in_line(line, hard_pct) for line in lyrics.splitlines())
 
-    return {
-        "easy": easy,
-        "medium": medium,
-        "hard": hard,
-    }
+    return {"easy": easy, "medium": medium, "hard": hard}
 
 def migrate_to_mongodb():
     """
     Migre les données depuis MySQL vers MongoDB avec un document par chanson.
     """
     with mysql_connection.cursor() as cursor:
-        # Récupérer tous les artistes
         cursor.execute("SELECT * FROM artists")
         artists = {artist["id"]: artist for artist in cursor.fetchall()}
 
-        # Récupérer toutes les chansons
         cursor.execute("SELECT * FROM songs")
         songs = cursor.fetchall()
 
         for song in songs:
             artist = artists.get(song["artist_id"])
             if not artist:
-                continue  # Passer si l'artiste est introuvable
+                continue
 
             artist_name = artist["name"]
             lyrics = song["lyrics"]

@@ -4,6 +4,7 @@ import json
 import os
 from bs4 import BeautifulSoup
 from dotenv import load_dotenv
+from unidecode import unidecode
 import sys
 
 # Charger les variables d'environnement
@@ -25,6 +26,7 @@ s3_client = boto3.client(
 
 BASE_URL = "https://api.genius.com"
 
+
 def request_genius(endpoint, params=None):
     """Effectue une requête à l'API Genius et gère les erreurs."""
     headers = {"Authorization": f"Bearer {GENIUS_ACCESS_TOKEN}"}
@@ -38,12 +40,14 @@ def request_genius(endpoint, params=None):
 
 def get_artist_id(artist_name):
     """Recherche l'ID d'un artiste sur Genius."""
-    data = request_genius("/search", {"q": artist_name})
+    normalized_name = unidecode(artist_name.lower())
+    data = request_genius("/search", {"q": normalized_name})
     if not data:
         return None
 
     for hit in data["response"]["hits"]:
-        if hit["result"]["primary_artist"]["name"].lower() == artist_name.lower():
+        name = unidecode(hit["result"]["primary_artist"]["name"].lower())
+        if name == normalized_name:
             return hit["result"]["primary_artist"]["id"]
 
     print(f"Aucun match exact pour {artist_name}.")
@@ -69,20 +73,26 @@ def get_artist_details(artist_id):
     }
 
 def get_popular_songs_by_artist(artist_id):
-    """Récupère les chansons populaires d'un artiste."""
-    data = request_genius(f"/artists/{artist_id}/songs", {"sort": "popularity", "per_page": 10})
+    """Récupère jusqu'à 10 chansons où l'artiste est l'interprète principal."""
+    data = request_genius(f"/artists/{artist_id}/songs", {"sort": "popularity", "per_page": 50})
     if not data:
         return []
 
-    songs = []
-    for song in data["response"]["songs"]:
-        songs.append({
+    # Filtrer uniquement les chansons où l'artiste est principal
+    primary_songs = [song for song in data["response"]["songs"] if song["primary_artist"]["id"] == artist_id]
+
+    # Prendre les 10 premières chansons valides
+    songs = primary_songs[:10]
+
+    return [
+        {
             "id": song["id"],
             "title": song["title"],
             "url": song["url"],
             "song_art_image_url": song["song_art_image_url"]
-        })
-    return songs
+        }
+        for song in songs
+    ]
 
 def get_song_details(song_id):
     """Récupère les détails d'une chanson spécifique."""
@@ -103,19 +113,28 @@ def get_song_details(song_id):
 
 def get_song_lyrics(song_url):
     """Scrape les paroles d'une chanson depuis Genius."""
-    response = requests.get(song_url)
-    if response.status_code != 200:
-        return f"Erreur lors du scraping : {response.status_code}"
+    try:
+        response = requests.get(song_url, timeout=10)
+        if response.status_code != 200:
+            return "Paroles indisponibles"
 
-    soup = BeautifulSoup(response.text, "html.parser")
-    lyrics_divs = soup.find_all("div", {"data-lyrics-container": "true"})
-    lyrics = "\n".join(div.get_text(separator="\n") for div in lyrics_divs)
+        soup = BeautifulSoup(response.text, "html.parser")
+        lyrics_divs = soup.find_all("div", {"data-lyrics-container": "true"})
+        lyrics = "\n".join(div.get_text(separator="\n") for div in lyrics_divs)
 
-    return lyrics.strip() if lyrics else "Paroles indisponibles"
+        return lyrics.strip() if lyrics else "Paroles indisponibles"
+    except Exception as e:
+        print(f"Erreur lors du scraping des paroles : {e}")
+        return "Paroles indisponibles"
 
 def upload_to_s3(key, content):
-    """Téléverse du contenu JSON sur S3."""
+    """Téléverse du contenu JSON sur S3 en évitant les doublons."""
     try:
+        response = s3_client.list_objects_v2(Bucket=BUCKET_NAME, Prefix=key)
+        if response.get("Contents"):
+            print(f"Le fichier {key} existe déjà, upload ignoré.")
+            return
+
         s3_client.put_object(
             Bucket=BUCKET_NAME, Key=key, 
             Body=json.dumps(content, ensure_ascii=False, indent=4).encode("utf-8"),
@@ -136,6 +155,7 @@ def process_artists(artists):
 
         artist_id = get_artist_id(artist_name)
         if not artist_id:
+            print(f"Artiste introuvable : {artist_name}")
             continue
 
         artist_details = get_artist_details(artist_id)
@@ -143,6 +163,10 @@ def process_artists(artists):
             continue
 
         songs = get_popular_songs_by_artist(artist_id)
+        if not songs:
+            print(f"Aucune chanson principale trouvée pour {artist_name}.")
+            continue
+
         song_details = []
         for song in songs:
             details = get_song_details(song["id"])
@@ -150,13 +174,13 @@ def process_artists(artists):
                 details["lyrics"] = get_song_lyrics(details["url"])
                 song_details.append(details)
 
-        artist_data = {
-            "artist": artist_details,
-            "songs": song_details
-        }
-
-        s3_key = f"raw/{artist_name.replace(' ', '_').lower()}.json"
-        upload_to_s3(s3_key, artist_data)
+        if song_details:
+            artist_data = {
+                "artist": artist_details,
+                "songs": song_details
+            }
+            s3_key = f"raw/{unidecode(artist_name).replace(' ', '_').lower()}.json"
+            upload_to_s3(s3_key, artist_data)
 
     print("Données enregistrées sur S3")
 
