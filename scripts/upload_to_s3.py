@@ -38,6 +38,7 @@ def request_genius(endpoint, params=None):
         print(f"Erreur API ({response.status_code}) : {response.text}")
         return None
 
+
 def get_artist_id(artist_name):
     """Recherche l'ID d'un artiste sur Genius."""
     normalized_name = unidecode(artist_name.lower())
@@ -52,6 +53,7 @@ def get_artist_id(artist_name):
 
     print(f"Aucun match exact pour {artist_name}.")
     return None
+
 
 def get_artist_details(artist_id):
     """Récupère les informations d'un artiste."""
@@ -72,44 +74,45 @@ def get_artist_details(artist_id):
         "bio": bio_text.strip(),
     }
 
+
 def get_popular_songs_by_artist(artist_id):
     """Récupère jusqu'à 10 chansons où l'artiste est l'interprète principal."""
     data = request_genius(f"/artists/{artist_id}/songs", {"sort": "popularity", "per_page": 50})
     if not data:
         return []
 
-    # Filtrer uniquement les chansons où l'artiste est principal
     primary_songs = [song for song in data["response"]["songs"] if song["primary_artist"]["id"] == artist_id]
+    return primary_songs[:10]
 
-    # Prendre les 10 premières chansons valides
-    songs = primary_songs[:10]
-
-    return [
-        {
-            "id": song["id"],
-            "title": song["title"],
-            "url": song["url"],
-            "song_art_image_url": song["song_art_image_url"]
-        }
-        for song in songs
-    ]
 
 def get_song_details(song_id):
-    """Récupère les détails d'une chanson spécifique."""
+    """Récupère les détails d'une chanson et cherche la traduction en français."""
     data = request_genius(f"/songs/{song_id}")
     if not data:
         return None
 
     song = data["response"]["song"]
-    
-    return {
+
+    # Récupérer les détails principaux
+    details = {
         "title": song["title"],
         "url": song["url"],
         "image_url": song["song_art_image_url"],
         "language": song.get("language", "unknown"),
         "release_date": song.get("release_date", "unknown"),
-        "pageviews": song["stats"].get("pageviews", 0)
+        "pageviews": song["stats"].get("pageviews", 0),
     }
+
+    # Si la langue n'est pas le français, chercher une traduction en français
+    if details["language"] != "fr":
+        french_translation = next((t for t in song.get("translation_songs", []) if t.get("language") == "fr"), None)
+        if french_translation:
+            details["french_translation_url"] = french_translation["url"]
+        else:
+            details["french_translation_url"] = None
+
+    return details
+
 
 def get_song_lyrics(song_url):
     """Scrape les paroles d'une chanson depuis Genius."""
@@ -127,6 +130,7 @@ def get_song_lyrics(song_url):
         print(f"Erreur lors du scraping des paroles : {e}")
         return "Paroles indisponibles"
 
+
 def upload_to_s3(key, content):
     """Téléverse du contenu JSON sur S3 en évitant les doublons."""
     try:
@@ -136,13 +140,15 @@ def upload_to_s3(key, content):
             return
 
         s3_client.put_object(
-            Bucket=BUCKET_NAME, Key=key, 
+            Bucket=BUCKET_NAME,
+            Key=key,
             Body=json.dumps(content, ensure_ascii=False, indent=4).encode("utf-8"),
-            ContentType="application/json"
+            ContentType="application/json",
         )
         print(f"Téléversement réussi : {key}")
     except Exception as e:
         print(f"Erreur lors du téléversement sur S3 : {str(e)}")
+
 
 def process_artists(artists):
     """Traite une liste d'artistes et enregistre les données sur S3."""
@@ -171,18 +177,27 @@ def process_artists(artists):
         for song in songs:
             details = get_song_details(song["id"])
             if details:
+                # Récupérer les paroles originales
                 details["lyrics"] = get_song_lyrics(details["url"])
+
+                # Récupérer les paroles traduites si disponibles
+                if details.get("french_translation_url"):
+                    details["french_lyrics"] = get_song_lyrics(details["french_translation_url"])
+                else:
+                    details["french_lyrics"] = ""
+
                 song_details.append(details)
 
         if song_details:
             artist_data = {
                 "artist": artist_details,
-                "songs": song_details
+                "songs": song_details,
             }
             s3_key = f"raw/{unidecode(artist_name).replace(' ', '_').lower()}.json"
             upload_to_s3(s3_key, artist_data)
 
     print("Données enregistrées sur S3")
+
 
 if __name__ == "__main__":
     artists = sys.argv[1:]

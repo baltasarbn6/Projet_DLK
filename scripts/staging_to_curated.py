@@ -38,17 +38,21 @@ mongo_db = mongo_client[MONGO_DATABASE]
 # Liste de mots courants à ne pas masquer
 STOP_WORDS = {"le", "la", "les", "un", "une", "des", "et", "mais", "ou", "donc", "or", "ni", "car", "je", "tu", "il", "elle", "on", "nous", "vous", "ils", "elles", "de", "du", "en", "à", "au", "aux", "par", "pour", "avec", "sans", "sous", "sur", "dans", "chez", "vers", "entre", "comme"}
 
+
 def generate_difficulty_versions(lyrics, easy_pct=10, medium_pct=25, hard_pct=40):
     """
     Génère trois versions de paroles (facile, intermédiaire, difficile) en masquant un pourcentage de mots,
     tout en excluant les mots courants définis dans STOP_WORDS.
     """
+    if not lyrics:
+        return {"easy": "Paroles indisponibles", "medium": "Paroles indisponibles", "hard": "Paroles indisponibles"}
+
     def mask_words_in_line(line, percentage):
         words = line.split()
         if not words:
             return line
         maskable_indices = [i for i, w in enumerate(words) if w.lower() not in STOP_WORDS]
-        num_to_mask = max(1, int(len(maskable_indices) * percentage / 100))
+        num_to_mask = max(1, int(len(maskable_indices) * percentage / 100)) if maskable_indices else 0
         mask_indices = sample(maskable_indices, min(len(maskable_indices), num_to_mask))
         return " ".join("____" if i in mask_indices else word for i, word in enumerate(words))
 
@@ -58,14 +62,18 @@ def generate_difficulty_versions(lyrics, easy_pct=10, medium_pct=25, hard_pct=40
 
     return {"easy": easy, "medium": medium, "hard": hard}
 
+
 def migrate_to_mongodb():
     """
-    Migre les données depuis MySQL vers MongoDB avec un document par chanson.
+    Migre les données depuis MySQL vers MongoDB avec un document par chanson,
+    en incluant les paroles traduites en français si disponibles.
     """
     with mysql_connection.cursor() as cursor:
+        # Récupérer les artistes
         cursor.execute("SELECT * FROM artists")
         artists = {artist["id"]: artist for artist in cursor.fetchall()}
 
+        # Récupérer les chansons avec leurs paroles originales et traduites
         cursor.execute("SELECT * FROM songs")
         songs = cursor.fetchall()
 
@@ -75,9 +83,13 @@ def migrate_to_mongodb():
                 continue
 
             artist_name = artist["name"]
-            lyrics = song["lyrics"]
+            lyrics = song.get("lyrics", "")
+            french_lyrics = song.get("french_lyrics", "")
+
+            # Générer les versions de difficulté pour les paroles originales
             difficulty_versions = generate_difficulty_versions(lyrics)
 
+            # Créer le document MongoDB
             song_doc = {
                 "title": song["title"],
                 "artist": artist_name,
@@ -88,11 +100,15 @@ def migrate_to_mongodb():
                 "pageviews": song["pageviews"],
                 "lyrics": lyrics,
                 "difficulty_versions": difficulty_versions,
+                "french_lyrics": french_lyrics if french_lyrics else ""
             }
 
             # Insérer ou mettre à jour la chanson dans MongoDB
             mongo_db.songs.replace_one({"title": song["title"], "artist": artist_name}, song_doc, upsert=True)
             print(f"Chanson insérée : {song['title']} ({artist_name})")
+
+    print("Migration vers MongoDB terminée !")
+
 
 if __name__ == "__main__":
     migrate_to_mongodb()

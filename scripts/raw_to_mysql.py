@@ -5,6 +5,7 @@ import os
 import re
 import json
 
+# Charger les variables d'environnement
 load_dotenv(dotenv_path="/opt/airflow/.env")
 
 AWS_ACCESS_KEY_ID = os.getenv("AWS_ACCESS_KEY_ID")
@@ -18,6 +19,7 @@ MYSQL_PASSWORD = os.getenv("MYSQL_PASSWORD")
 MYSQL_DATABASE = os.getenv("MYSQL_DATABASE")
 MYSQL_PORT = int(os.getenv("MYSQL_PORT"))
 
+# Initialisation du client S3
 s3_client = boto3.client(
     "s3",
     aws_access_key_id=AWS_ACCESS_KEY_ID,
@@ -25,6 +27,7 @@ s3_client = boto3.client(
     region_name=AWS_REGION,
 )
 
+# Connexion à MySQL
 connection = pymysql.connect(
     host=MYSQL_HOST,
     user=MYSQL_USER,
@@ -35,17 +38,26 @@ connection = pymysql.connect(
     cursorclass=pymysql.cursors.DictCursor,
 )
 
+
 def list_raw_files():
+    """Liste les fichiers JSON présents dans le bucket S3."""
     response = s3_client.list_objects_v2(Bucket=BUCKET_NAME, Prefix="raw/")
     return [obj["Key"] for obj in response.get("Contents", []) if obj["Key"].endswith(".json")]
 
+
 def clean_lyrics(raw_lyrics):
+    """Nettoie les paroles en supprimant les balises et les espaces inutiles."""
+    if not raw_lyrics:
+        return "Paroles indisponibles"
     raw_lyrics = re.sub(r"^Paroles\s*:", "", raw_lyrics)
-    raw_lyrics = re.sub(r"\[.*?\]", "", raw_lyrics)
+    raw_lyrics = re.sub(r"\[.*?\]", "", raw_lyrics)  # Retire les titres comme [Refrain], [Couplet 1]...
     return "\n".join(line.strip() for line in raw_lyrics.split("\n") if line.strip())
 
+
 def process_file(file_key):
+    """Traite un fichier JSON depuis S3 et insère les données dans MySQL."""
     try:
+        # Récupération et décodage du fichier S3
         response = s3_client.get_object(Bucket=BUCKET_NAME, Key=file_key)
         content = response["Body"].read().decode("utf-8")
         data = json.loads(content)
@@ -53,12 +65,14 @@ def process_file(file_key):
         print(f"Erreur lors de la récupération du fichier S3 {file_key} : {e}")
         return
 
+    # Récupération des données de l'artiste
     artist_name = data["artist"]["name"]
     bio = data["artist"].get("bio", "Biographie non disponible")
     artist_image_url = data["artist"]["image_url"]
 
     try:
         with connection.cursor() as cursor:
+            # Insertion ou mise à jour de l'artiste
             cursor.execute(
                 """
                 INSERT INTO artists (name, bio, image_url) 
@@ -69,9 +83,11 @@ def process_file(file_key):
             )
             connection.commit()
 
+            # Récupérer l'ID de l'artiste
             cursor.execute("SELECT id FROM artists WHERE name = %s", (artist_name,))
             artist_id = cursor.fetchone()["id"]
 
+            # Insertion des chansons
             for song in data["songs"]:
                 title = song.get("title", "Titre inconnu")
                 url = song.get("url", "")
@@ -80,27 +96,37 @@ def process_file(file_key):
                 release_date = song.get("release_date", None)
                 pageviews = song.get("pageviews", 0)
                 lyrics = clean_lyrics(song.get("lyrics", "Paroles indisponibles"))
+                french_lyrics = clean_lyrics(song.get("french_lyrics", ""))
 
                 cursor.execute(
                     """
-                    INSERT INTO songs (artist_id, title, url, image_url, language, release_date, pageviews, lyrics)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-                    ON DUPLICATE KEY UPDATE url=VALUES(url), image_url=VALUES(image_url), pageviews=VALUES(pageviews), lyrics=VALUES(lyrics)
+                    INSERT INTO songs (artist_id, title, url, image_url, language, release_date, pageviews, lyrics, french_lyrics)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    ON DUPLICATE KEY UPDATE 
+                        url=VALUES(url), 
+                        image_url=VALUES(image_url), 
+                        pageviews=VALUES(pageviews), 
+                        lyrics=VALUES(lyrics),
+                        french_lyrics=VALUES(french_lyrics)
                     """,
-                    (artist_id, title, url, image_url, language, release_date, pageviews, lyrics)
+                    (artist_id, title, url, image_url, language, release_date, pageviews, lyrics, french_lyrics)
                 )
             connection.commit()
+
         print(f"Données insérées/actualisées pour l'artiste : {artist_name}")
 
     except Exception as e:
         print(f"Erreur lors de l'insertion en base MySQL pour {artist_name} : {e}")
 
+
 def process_all_files():
+    """Parcourt et traite tous les fichiers JSON présents sur S3."""
     files = list_raw_files()
     print(f"Fichiers trouvés : {len(files)}")
     for file_key in files:
         print(f"Traitement du fichier : {file_key}")
         process_file(file_key)
+
 
 if __name__ == "__main__":
     process_all_files()

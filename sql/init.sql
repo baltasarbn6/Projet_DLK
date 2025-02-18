@@ -15,5 +15,6 @@ CREATE TABLE IF NOT EXISTS songs (
     release_date DATE,
     pageviews INT DEFAULT 0,
     lyrics TEXT,
+    french_lyrics TEXT,
     FOREIGN KEY (artist_id) REFERENCES artists(id)
 );

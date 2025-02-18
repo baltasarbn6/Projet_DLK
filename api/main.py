@@ -60,6 +60,9 @@ app.add_middleware(
 class ArtistRequest(BaseModel):
     artists: List[str]
 
+class SongRequest(BaseModel):
+    songs: List[str]
+
 @app.get("/")
 async def root():
     return {"message": "Bienvenue sur l'API Gateway du projet DLK"}
@@ -166,14 +169,36 @@ async def ingest_data(request: ArtistRequest):
     if not request.artists:
         raise HTTPException(status_code=400, detail="Liste d'artistes vide")
 
-    payload = {
-        "conf": {"artists": request.artists}
-    }
+    # Construire dynamiquement l'URL pour le DAG des artistes
+    airflow_api_url = f"{os.getenv('AIRFLOW_BASE_URL')}/my_dag/dagRuns"
+
+    payload = {"conf": {"artists": request.artists}}
     auth = (AIRFLOW_USER, AIRFLOW_PASSWORD)
     headers = {"Content-Type": "application/json"}
 
-    response = requests.post(AIRFLOW_API_URL, auth=auth, headers=headers, json=payload)
+    response = requests.post(airflow_api_url, auth=auth, headers=headers, json=payload)
     if response.status_code != 200:
-        raise HTTPException(status_code=500, detail=f"Erreur lors du déclenchement du DAG : {response.text}")
+        raise HTTPException(status_code=500, detail=f"Erreur lors du déclenchement du DAG 'my_dag': {response.text}")
 
-    return {"message": f"Pipeline déclenché avec succès pour {len(request.artists)} artistes."}
+    return {"message": f"Pipeline 'my_dag' déclenché avec succès pour {len(request.artists)} artistes."}
+
+
+@app.post("/ingest_songs")
+async def ingest_songs(request: SongRequest):
+    """Déclenche le pipeline d'ingestion basé sur les chansons."""
+    if not request.songs:
+        raise HTTPException(status_code=400, detail="Liste de chansons vide")
+
+    # Construire dynamiquement l'URL pour le DAG des chansons
+    airflow_api_url = f"{os.getenv('AIRFLOW_BASE_URL')}/my_dag_by_song/dagRuns"
+
+    payload = {"conf": {"songs": request.songs}}
+    auth = (AIRFLOW_USER, AIRFLOW_PASSWORD)
+    headers = {"Content-Type": "application/json"}
+
+    response = requests.post(airflow_api_url, auth=auth, headers=headers, json=payload)
+    if response.status_code != 200:
+        raise HTTPException(status_code=500, detail=f"Erreur lors du déclenchement du DAG 'my_dag_by_song': {response.text}")
+
+    return {"message": f"Pipeline 'my_dag_by_song' déclenché avec succès pour {len(request.songs)} chansons."}
+
