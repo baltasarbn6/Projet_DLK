@@ -4,10 +4,16 @@ import os
 from dotenv import load_dotenv
 from random import seed, sample
 from datetime import date
+import nltk
+from nltk.corpus import stopwords
 
 # Charger les variables d'environnement
 load_dotenv(dotenv_path="/opt/airflow/.env")
-seed(42)  # Fixer une graine pour des résultats reproductibles
+seed(42)
+
+# Télécharger les stopwords français si nécessaire
+nltk.download("stopwords")
+STOP_WORDS = set(stopwords.words("french"))
 
 # Configuration MySQL
 MYSQL_HOST = os.getenv("MYSQL_HOST")
@@ -35,13 +41,6 @@ mysql_connection = pymysql.connect(
 mongo_client = pymongo.MongoClient(MONGO_URI)
 mongo_db = mongo_client[MONGO_DATABASE]
 
-# Liste de mots courants à ne pas masquer
-STOP_WORDS = {"le", "la", "les", "un", "une", "des", "et", "mais", "ou", "donc", "or", "ni", "car", 
-              "je", "tu", "il", "elle", "on", "nous", "vous", "ils", "elles", "de", "du", "en", 
-              "à", "au", "aux", "par", "pour", "avec", "sans", "sous", "sur", "dans", "chez", "vers", 
-              "entre", "comme"}
-
-
 def generate_difficulty_versions(lyrics, easy_pct=10, medium_pct=25, hard_pct=40):
     """
     Génère trois versions de paroles (facile, intermédiaire, difficile) en masquant un pourcentage de mots.
@@ -61,7 +60,6 @@ def generate_difficulty_versions(lyrics, easy_pct=10, medium_pct=25, hard_pct=40
     hard = "\n".join(mask_words(line, hard_pct) for line in lyrics.splitlines())
 
     return {"easy": easy, "medium": medium, "hard": hard}
-
 
 def migrate_to_mongodb():
     """
@@ -118,7 +116,6 @@ def migrate_to_mongodb():
             print(f"Chanson insérée : {song['title']} ({artist_name})")
 
     print("Migration complète vers MongoDB !")
-
 
 if __name__ == "__main__":
     migrate_to_mongodb()

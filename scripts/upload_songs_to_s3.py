@@ -26,26 +26,28 @@ s3_client = boto3.client(
 
 BASE_URL = "https://api.genius.com"
 
-
 def request_genius(endpoint, params=None):
     """Effectue une requête à l'API Genius."""
     headers = {"Authorization": f"Bearer {GENIUS_ACCESS_TOKEN}"}
     response = requests.get(f"{BASE_URL}{endpoint}", headers=headers, params=params)
     return response.json() if response.status_code == 200 else None
 
-
-def get_song_details_by_title(song_title):
-    """Recherche une chanson par son titre et récupère ses détails."""
-    data = request_genius("/search", {"q": song_title})
+def get_song_details_by_title_and_artist(song_title, artist_name):
+    """Recherche une chanson par son titre et son artiste et récupère ses détails."""
+    data = request_genius("/search", {"q": f"{song_title} {artist_name}"})
     if not data:
         return None
 
     for hit in data["response"]["hits"]:
-        if unidecode(hit["result"]["title"].lower()) == unidecode(song_title.lower()):
-            song_id = hit["result"]["id"]
+        song = hit["result"]
+        if (
+            unidecode(song["title"].lower()) == unidecode(song_title.lower()) and
+            unidecode(song["primary_artist"]["name"].lower()) == unidecode(artist_name.lower())
+        ):
+            song_id = song["id"]
             return request_genius(f"/songs/{song_id}")["response"]["song"]
+    
     return None
-
 
 def get_artist_details(artist_id):
     """Récupère les informations de l'artiste."""
@@ -66,7 +68,6 @@ def get_artist_details(artist_id):
         "bio": bio_text.strip() or "Biographie non disponible",
     }
 
-
 def get_song_lyrics(song_url):
     """Scrape les paroles d'une chanson depuis Genius."""
     try:
@@ -82,12 +83,11 @@ def get_song_lyrics(song_url):
         print(f"Erreur lors du scraping des paroles : {e}")
         return "Paroles indisponibles"
 
-
-def upload_song_to_s3(song_title):
-    """Récupère les détails d'une chanson et les téléverse sur S3."""
-    song_data = get_song_details_by_title(song_title)
+def upload_song_to_s3(song_title, artist_name):
+    """Récupère les détails d'une chanson spécifique et les téléverse sur S3."""
+    song_data = get_song_details_by_title_and_artist(song_title, artist_name)
     if not song_data:
-        print(f"Chanson introuvable : {song_title}")
+        print(f"Chanson introuvable : {song_title} par {artist_name}")
         return
 
     # Récupérer les informations de l'artiste
@@ -119,18 +119,23 @@ def upload_song_to_s3(song_title):
         "french_lyrics": french_lyrics
     }
 
+    # Générer un nom de fichier unique basé sur l'artiste et le titre
+    safe_title = unidecode(song_title).replace(" ", "_").lower()
+    safe_artist = unidecode(artist_name).replace(" ", "_").lower()
+    s3_key = f"raw/{safe_artist}_{safe_title}.json"
+
     # Envoi vers S3
-    s3_key = f"raw/{unidecode(song_title).replace(' ', '_').lower()}.json"
     s3_client.put_object(
         Bucket=BUCKET_NAME,
         Key=s3_key,
         Body=json.dumps(song_info, ensure_ascii=False, indent=4).encode("utf-8"),
         ContentType="application/json"
     )
-    print(f"Téléversé sur S3 : {song_title}")
-
+    print(f"Téléversé sur S3 : {song_title} - {artist_name}")
 
 if __name__ == "__main__":
-    songs = sys.argv[1:]
-    for song in songs:
-        upload_song_to_s3(song)
+    if len(sys.argv) < 3 or len(sys.argv) % 2 == 0:
+        sys.exit(1)
+    songs = list(zip(sys.argv[1::2], sys.argv[2::2]))
+    for title, artist in songs:
+        upload_song_to_s3(title, artist)

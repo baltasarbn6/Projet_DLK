@@ -8,3 +8,4 @@ pymysql
 pymongo
 cryptography
 unidecode
+nltk

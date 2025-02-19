@@ -5,7 +5,6 @@ import os
 import re
 import json
 
-# Charger les variables d'environnement
 load_dotenv(dotenv_path="/opt/airflow/.env")
 
 AWS_ACCESS_KEY_ID = os.getenv("AWS_ACCESS_KEY_ID")

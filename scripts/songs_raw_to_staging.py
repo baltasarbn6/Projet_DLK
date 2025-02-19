@@ -2,9 +2,9 @@ import boto3
 import pymysql
 import os
 import json
+import re
 from dotenv import load_dotenv
 
-# Charger les variables d'environnement
 load_dotenv(dotenv_path="/opt/airflow/.env")
 
 AWS_ACCESS_KEY_ID = os.getenv("AWS_ACCESS_KEY_ID")
@@ -37,11 +37,19 @@ connection = pymysql.connect(
     cursorclass=pymysql.cursors.DictCursor,
 )
 
+def clean_lyrics(raw_lyrics):
+    """Nettoie les paroles en supprimant les balises et les espaces inutiles."""
+    if not raw_lyrics or raw_lyrics == "Paroles indisponibles":
+        return "Paroles indisponibles"
+    raw_lyrics = re.sub(r"^Paroles\s*:", "", raw_lyrics)
+    raw_lyrics = re.sub(r"\[.*?\]", "", raw_lyrics)  # Retire les titres comme [Refrain], [Couplet 1]...
+    return "\n".join(line.strip() for line in raw_lyrics.split("\n") if line.strip())
+
 def artist_exists(artist_name):
     """Vérifie si un artiste existe dans la base."""
     with connection.cursor() as cursor:
         cursor.execute("SELECT id FROM artists WHERE name = %s", (artist_name,))
-        return cursor.fetchone()  # Retourne l'ID de l'artiste s'il existe
+        return cursor.fetchone()
 
 def insert_artist(artist_name, bio, image_url):
     """Ajoute un artiste dans la base s'il n'existe pas encore et retourne son ID."""
@@ -65,14 +73,12 @@ def list_song_files():
     files = response.get("Contents", [])
     song_files = []
 
-    # On filtre les fichiers qui contiennent un 'title' (chanson)
     for obj in files:
         key = obj["Key"]
         if key.endswith(".json"):
             response = s3_client.get_object(Bucket=BUCKET_NAME, Key=key)
             content = json.loads(response["Body"].read().decode("utf-8"))
 
-            # On vérifie si c'est un fichier de chanson
             if "title" in content:
                 song_files.append(key)
     return song_files
@@ -82,12 +88,10 @@ def process_song_file(file_key):
     response = s3_client.get_object(Bucket=BUCKET_NAME, Key=file_key)
     data = json.loads(response["Body"].read().decode("utf-8"))
 
-    # Informations de l'artiste
     artist_name = data["artist"]["name"]
     artist_bio = data["artist"].get("bio", "Biographie non disponible")
     artist_image_url = data["artist"].get("image_url", "")
 
-    # Vérifier si l'artiste existe, sinon l'ajouter
     artist = artist_exists(artist_name)
     if not artist:
         artist_id = insert_artist(artist_name, artist_bio, artist_image_url)
@@ -95,18 +99,18 @@ def process_song_file(file_key):
     else:
         artist_id = artist["id"]
 
-    # Extraction des données de la chanson
     title = data.get("title", "Titre inconnu")
     url = data.get("url", "")
     image_url = data.get("image_url", "")
     language = data.get("language", "unknown")
     release_date = data.get("release_date", None)
     pageviews = data.get("pageviews", 0)
-    lyrics = data.get("lyrics", "")
-    french_lyrics = data.get("french_lyrics", "")
+
+    # Nettoyer les paroles avant insertion dans MySQL
+    lyrics = clean_lyrics(data.get("lyrics", ""))
+    french_lyrics = clean_lyrics(data.get("french_lyrics", ""))
 
     with connection.cursor() as cursor:
-        # Insertion de la chanson
         cursor.execute(
             """
             INSERT INTO songs (artist_id, title, url, image_url, language, release_date, pageviews, lyrics, french_lyrics)
