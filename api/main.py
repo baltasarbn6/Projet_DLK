@@ -148,13 +148,31 @@ async def get_stats():
     response = s3_client.list_objects_v2(Bucket=BUCKET_NAME, Prefix="raw/")
     s3_file_count = len(response.get("Contents", [])) if "Contents" in response else 0
 
-    with mysql_connection.cursor() as cursor:
-        cursor.execute("SELECT COUNT(*) as count FROM artists")
-        mysql_artists_count = cursor.fetchone()["count"]
+    # Créer une nouvelle connexion à chaque appel
+    try:
+        connection = pymysql.connect(
+            host=MYSQL_HOST,
+            user=MYSQL_USER,
+            password=MYSQL_PASSWORD,
+            database=MYSQL_DATABASE,
+            port=MYSQL_PORT,
+            charset="utf8mb4",
+            cursorclass=pymysql.cursors.DictCursor,
+        )
 
-        cursor.execute("SELECT COUNT(*) as count FROM songs")
-        mysql_songs_count = cursor.fetchone()["count"]
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT COUNT(*) as count FROM artists")
+            mysql_artists_count = cursor.fetchone()["count"]
 
+            cursor.execute("SELECT COUNT(*) as count FROM songs")
+            mysql_songs_count = cursor.fetchone()["count"]
+
+        connection.close()
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Erreur lors de la récupération des stats MySQL: {e}")
+
+    # Récupération des stats MongoDB
     mongo_songs_count = mongo_db.songs.count_documents({})
     mongo_artists_count = mongo_db.songs.distinct("artist")
 
@@ -169,18 +187,35 @@ async def ingest_data(request: ArtistRequest):
     if not request.artists:
         raise HTTPException(status_code=400, detail="Liste d'artistes vide")
 
-    # Construire dynamiquement l'URL pour le DAG des artistes
-    airflow_api_url = f"{os.getenv('AIRFLOW_BASE_URL')}/my_dag/dagRuns"
-
-    payload = {"conf": {"artists": request.artists}}
+    # Unpause le DAG avant de lancer
+    airflow_api_url = f"{os.getenv('AIRFLOW_BASE_URL')}/dags/my_dag"
     auth = (AIRFLOW_USER, AIRFLOW_PASSWORD)
     headers = {"Content-Type": "application/json"}
 
-    response = requests.post(airflow_api_url, auth=auth, headers=headers, json=payload)
+    # Unpause si nécessaire
+    response = requests.get(airflow_api_url, auth=auth, headers=headers)
+    if response.status_code == 200:
+        dag_info = response.json()
+        if dag_info.get("is_paused"):
+            # DAG est en pause -> on l'unpause
+            unpause_response = requests.patch(airflow_api_url, auth=auth, headers=headers, json={"is_paused": False})
+            if unpause_response.status_code == 200:
+                print("✅ DAG 'my_dag' unpausé automatiquement.")
+            else:
+                raise HTTPException(status_code=500, detail="Impossible d'unpause le DAG.")
+    else:
+        raise HTTPException(status_code=500, detail="Impossible de vérifier l'état du DAG.")
+
+    # Déclencher le DAG après unpause
+    dag_run_url = f"{os.getenv('AIRFLOW_BASE_URL')}/dags/my_dag/dagRuns"
+    payload = {"conf": {"artists": request.artists}}
+    response = requests.post(dag_run_url, auth=auth, headers=headers, json=payload)
+
     if response.status_code != 200:
         raise HTTPException(status_code=500, detail=f"Erreur lors du déclenchement du DAG 'my_dag': {response.text}")
 
     return {"message": f"Pipeline 'my_dag' déclenché avec succès pour {len(request.artists)} artistes."}
+
 
 
 @app.post("/ingest_songs")
@@ -190,7 +225,7 @@ async def ingest_songs(request: SongRequest):
         raise HTTPException(status_code=400, detail="Liste de chansons vide")
 
     # Construire dynamiquement l'URL pour le DAG des chansons
-    airflow_api_url = f"{os.getenv('AIRFLOW_BASE_URL')}/my_dag_by_song/dagRuns"
+    airflow_api_url = f"{os.getenv('AIRFLOW_BASE_URL')}/dags/my_dag_by_song/dagRuns"
 
     payload = {"conf": {"songs": request.songs}}
     auth = (AIRFLOW_USER, AIRFLOW_PASSWORD)
@@ -201,4 +236,3 @@ async def ingest_songs(request: SongRequest):
         raise HTTPException(status_code=500, detail=f"Erreur lors du déclenchement du DAG 'my_dag_by_song': {response.text}")
 
     return {"message": f"Pipeline 'my_dag_by_song' déclenché avec succès pour {len(request.songs)} chansons."}
-

@@ -37,6 +37,27 @@ connection = pymysql.connect(
     cursorclass=pymysql.cursors.DictCursor,
 )
 
+def artist_exists(artist_name):
+    """Vérifie si un artiste existe dans la base."""
+    with connection.cursor() as cursor:
+        cursor.execute("SELECT id FROM artists WHERE name = %s", (artist_name,))
+        return cursor.fetchone()  # Retourne l'ID de l'artiste s'il existe
+
+def insert_artist(artist_name, bio, image_url):
+    """Ajoute un artiste dans la base s'il n'existe pas encore et retourne son ID."""
+    with connection.cursor() as cursor:
+        cursor.execute(
+            """
+            INSERT INTO artists (name, bio, image_url) 
+            VALUES (%s, %s, %s)
+            ON DUPLICATE KEY UPDATE bio=VALUES(bio), image_url=VALUES(image_url)
+            """,
+            (artist_name, bio, image_url),
+        )
+        connection.commit()
+        
+        cursor.execute("SELECT id FROM artists WHERE name = %s", (artist_name,))
+        return cursor.fetchone()["id"]
 
 def list_song_files():
     """Liste uniquement les fichiers de chansons depuis S3."""
@@ -56,11 +77,23 @@ def list_song_files():
                 song_files.append(key)
     return song_files
 
-
 def process_song_file(file_key):
     """Lit et insère un fichier JSON de chanson dans MySQL."""
     response = s3_client.get_object(Bucket=BUCKET_NAME, Key=file_key)
     data = json.loads(response["Body"].read().decode("utf-8"))
+
+    # Informations de l'artiste
+    artist_name = data["artist"]["name"]
+    artist_bio = data["artist"].get("bio", "Biographie non disponible")
+    artist_image_url = data["artist"].get("image_url", "")
+
+    # Vérifier si l'artiste existe, sinon l'ajouter
+    artist = artist_exists(artist_name)
+    if not artist:
+        artist_id = insert_artist(artist_name, artist_bio, artist_image_url)
+        print(f"Artiste ajouté : {artist_name}")
+    else:
+        artist_id = artist["id"]
 
     # Extraction des données de la chanson
     title = data.get("title", "Titre inconnu")
@@ -72,25 +105,10 @@ def process_song_file(file_key):
     lyrics = data.get("lyrics", "")
     french_lyrics = data.get("french_lyrics", "")
 
-    # Informations de l'artiste
-    artist_name = data["artist"]["name"]
-    artist_bio = data["artist"]["bio"]
-    artist_image_url = data["artist"]["image_url"]
-
     with connection.cursor() as cursor:
-        # Insertion de l'artiste si nécessaire
-        cursor.execute("""
-            INSERT INTO artists (name, bio, image_url) 
-            VALUES (%s, %s, %s) 
-            ON DUPLICATE KEY UPDATE bio=VALUES(bio), image_url=VALUES(image_url)
-        """, (artist_name, artist_bio, artist_image_url))
-
-        # Récupération de l'ID de l'artiste
-        cursor.execute("SELECT id FROM artists WHERE name = %s", (artist_name,))
-        artist_id = cursor.fetchone()["id"]
-
         # Insertion de la chanson
-        cursor.execute("""
+        cursor.execute(
+            """
             INSERT INTO songs (artist_id, title, url, image_url, language, release_date, pageviews, lyrics, french_lyrics)
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
             ON DUPLICATE KEY UPDATE 
@@ -99,11 +117,12 @@ def process_song_file(file_key):
                 pageviews=VALUES(pageviews), 
                 lyrics=VALUES(lyrics),
                 french_lyrics=VALUES(french_lyrics)
-        """, (artist_id, title, url, image_url, language, release_date, pageviews, lyrics, french_lyrics))
+            """,
+            (artist_id, title, url, image_url, language, release_date, pageviews, lyrics, french_lyrics),
+        )
+        connection.commit()
 
-    connection.commit()
-    print(f"Fichier {file_key} inséré avec succès.")
-
+    print(f"Chanson insérée : {title} ({artist_name})")
 
 def process_all_songs():
     """Parcourt tous les fichiers de chansons et les insère dans MySQL."""
@@ -111,7 +130,6 @@ def process_all_songs():
     for file_key in files:
         print(f"Traitement de {file_key}...")
         process_song_file(file_key)
-
 
 if __name__ == "__main__":
     process_all_songs()

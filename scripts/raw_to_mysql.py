@@ -38,12 +38,10 @@ connection = pymysql.connect(
     cursorclass=pymysql.cursors.DictCursor,
 )
 
-
 def list_raw_files():
     """Liste les fichiers JSON présents dans le bucket S3."""
     response = s3_client.list_objects_v2(Bucket=BUCKET_NAME, Prefix="raw/")
     return [obj["Key"] for obj in response.get("Contents", []) if obj["Key"].endswith(".json")]
-
 
 def clean_lyrics(raw_lyrics):
     """Nettoie les paroles en supprimant les balises et les espaces inutiles."""
@@ -53,11 +51,15 @@ def clean_lyrics(raw_lyrics):
     raw_lyrics = re.sub(r"\[.*?\]", "", raw_lyrics)  # Retire les titres comme [Refrain], [Couplet 1]...
     return "\n".join(line.strip() for line in raw_lyrics.split("\n") if line.strip())
 
+def artist_exists(artist_name):
+    """Vérifie si un artiste existe dans la base."""
+    with connection.cursor() as cursor:
+        cursor.execute("SELECT id FROM artists WHERE name = %s", (artist_name,))
+        return cursor.fetchone()
 
 def process_file(file_key):
     """Traite un fichier JSON depuis S3 et insère les données dans MySQL."""
     try:
-        # Récupération et décodage du fichier S3
         response = s3_client.get_object(Bucket=BUCKET_NAME, Key=file_key)
         content = response["Body"].read().decode("utf-8")
         data = json.loads(content)
@@ -65,30 +67,41 @@ def process_file(file_key):
         print(f"Erreur lors de la récupération du fichier S3 {file_key} : {e}")
         return
 
-    # Récupération des données de l'artiste
+    # Vérification des données de l'artiste
+    if "artist" not in data or "name" not in data["artist"]:
+        print(f"Données invalides dans {file_key}, champ 'artist' manquant")
+        return
+
     artist_name = data["artist"]["name"]
     bio = data["artist"].get("bio", "Biographie non disponible")
-    artist_image_url = data["artist"]["image_url"]
+    artist_image_url = data["artist"].get("image_url", "")
 
     try:
         with connection.cursor() as cursor:
-            # Insertion ou mise à jour de l'artiste
-            cursor.execute(
-                """
-                INSERT INTO artists (name, bio, image_url) 
-                VALUES (%s, %s, %s) 
-                ON DUPLICATE KEY UPDATE bio=VALUES(bio), image_url=VALUES(image_url)
-                """,
-                (artist_name, bio, artist_image_url)
-            )
-            connection.commit()
-
-            # Récupérer l'ID de l'artiste
+            # Vérifier si l'artiste existe déjà
             cursor.execute("SELECT id FROM artists WHERE name = %s", (artist_name,))
-            artist_id = cursor.fetchone()["id"]
+            artist = cursor.fetchone()
+
+            if not artist:
+                cursor.execute(
+                    """
+                    INSERT INTO artists (name, bio, image_url) 
+                    VALUES (%s, %s, %s)
+                    """,
+                    (artist_name, bio, artist_image_url),
+                )
+                connection.commit()
+                print(f"Artiste inséré : {artist_name}")
+
+                # Récupérer l'ID nouvellement inséré
+                cursor.execute("SELECT id FROM artists WHERE name = %s", (artist_name,))
+                artist_id = cursor.fetchone()["id"]
+            else:
+                artist_id = artist["id"]
+                print(f"Artiste déjà en base : {artist_name} (ID: {artist_id})")
 
             # Insertion des chansons
-            for song in data["songs"]:
+            for song in data.get("songs", []):
                 title = song.get("title", "Titre inconnu")
                 url = song.get("url", "")
                 image_url = song.get("image_url", "")
@@ -103,11 +116,11 @@ def process_file(file_key):
                     INSERT INTO songs (artist_id, title, url, image_url, language, release_date, pageviews, lyrics, french_lyrics)
                     VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                     ON DUPLICATE KEY UPDATE 
-                        url=VALUES(url), 
-                        image_url=VALUES(image_url), 
-                        pageviews=VALUES(pageviews), 
-                        lyrics=VALUES(lyrics),
-                        french_lyrics=VALUES(french_lyrics)
+                        url = VALUES(url),
+                        image_url = VALUES(image_url),
+                        pageviews = VALUES(pageviews),
+                        lyrics = VALUES(lyrics),
+                        french_lyrics = VALUES(french_lyrics)
                     """,
                     (artist_id, title, url, image_url, language, release_date, pageviews, lyrics, french_lyrics)
                 )
@@ -116,8 +129,8 @@ def process_file(file_key):
         print(f"Données insérées/actualisées pour l'artiste : {artist_name}")
 
     except Exception as e:
-        print(f"Erreur lors de l'insertion en base MySQL pour {artist_name} : {e}")
-
+        connection.rollback()
+        print(f"Erreur MySQL pour {artist_name} : {e}")
 
 def process_all_files():
     """Parcourt et traite tous les fichiers JSON présents sur S3."""
@@ -126,7 +139,6 @@ def process_all_files():
     for file_key in files:
         print(f"Traitement du fichier : {file_key}")
         process_file(file_key)
-
 
 if __name__ == "__main__":
     process_all_files()

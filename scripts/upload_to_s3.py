@@ -76,13 +76,13 @@ def get_artist_details(artist_id):
 
 
 def get_popular_songs_by_artist(artist_id):
-    """Récupère jusqu'à 10 chansons où l'artiste est l'interprète principal."""
+    """Récupère jusqu'à 20 chansons où l'artiste est l'interprète principal."""
     data = request_genius(f"/artists/{artist_id}/songs", {"sort": "popularity", "per_page": 50})
     if not data:
         return []
 
     primary_songs = [song for song in data["response"]["songs"] if song["primary_artist"]["id"] == artist_id]
-    return primary_songs[:10]
+    return primary_songs[:20]
 
 
 def get_song_details(song_id):
