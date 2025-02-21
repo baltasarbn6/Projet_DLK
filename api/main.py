@@ -251,3 +251,69 @@ async def ingest_songs(request: SongRequest):
         raise HTTPException(status_code=500, detail=f"Erreur lors du déclenchement du DAG 'dag_songs': {response.text}")
     
     return {"message": f"Pipeline chansons déclenché avec succès pour {len(request.songs)} chansons."}
+
+@app.post("/ingest_fast")
+async def ingest_fast(request: ArtistRequest):
+    """Déclenche le pipeline d'ingestion rapide basé sur les artistes avec unpause automatique du DAG."""
+    if not request.artists:
+        raise HTTPException(status_code=400, detail="Liste d'artistes vide")
+
+    # Unpause le DAG avant de lancer
+    airflow_api_url = f"{os.getenv('AIRFLOW_BASE_URL')}/dags/dag_artists_fast"
+    auth = (os.getenv("AIRFLOW_USER"), os.getenv("AIRFLOW_PASSWORD"))
+    headers = {"Content-Type": "application/json"}
+    
+    response = requests.get(airflow_api_url, auth=auth, headers=headers)
+    if response.status_code == 200:
+        dag_info = response.json()
+        if dag_info.get("is_paused"):
+            unpause_response = requests.patch(airflow_api_url, auth=auth, headers=headers, json={"is_paused": False})
+            if unpause_response.status_code == 200:
+                print("DAG 'dag_artists_fast' unpausé automatiquement.")
+            else:
+                raise HTTPException(status_code=500, detail="Impossible d'unpause le DAG 'dag_artists_fast'.")
+    else:
+        raise HTTPException(status_code=500, detail="Impossible de vérifier l'état du DAG 'dag_artists_fast'.")
+
+    # Déclencher le DAG après unpause
+    dag_run_url = f"{os.getenv('AIRFLOW_BASE_URL')}/dags/dag_artists_fast/dagRuns"
+    payload = {"conf": {"artists": request.artists}}
+    response = requests.post(dag_run_url, auth=auth, headers=headers, json=payload)
+
+    if response.status_code != 200:
+        raise HTTPException(status_code=500, detail=f"Erreur lors du déclenchement du DAG 'dag_artists_fast': {response.text}")
+
+    return {"message": f"Pipeline rapide déclenché avec succès pour {len(request.artists)} artistes."}
+
+@app.post("/ingest_songs_fast")
+async def ingest_songs(request: SongRequest):
+    """Déclenche le pipeline d'ingestion basé sur les chansons."""
+    if not request.songs:
+        raise HTTPException(status_code=400, detail="Liste de chansons vide")
+    
+    # Unpause le DAG avant de lancer
+    airflow_api_url = f"{os.getenv('AIRFLOW_BASE_URL')}/dags/dag_songs_fast"
+    auth = (os.getenv("AIRFLOW_USER"), os.getenv("AIRFLOW_PASSWORD"))
+    headers = {"Content-Type": "application/json"}
+    
+    response = requests.get(airflow_api_url, auth=auth, headers=headers)
+    if response.status_code == 200:
+        dag_info = response.json()
+        if dag_info.get("is_paused"):
+            unpause_response = requests.patch(airflow_api_url, auth=auth, headers=headers, json={"is_paused": False})
+            if unpause_response.status_code == 200:
+                print("DAG 'dag_songs_fast' unpausé automatiquement.")
+            else:
+                raise HTTPException(status_code=500, detail="Impossible d'unpause le DAG.")
+    else:
+        raise HTTPException(status_code=500, detail="Impossible de vérifier l'état du DAG.")
+    
+    # Déclencher le DAG après unpause
+    dag_run_url = f"{os.getenv('AIRFLOW_BASE_URL')}/dags/dag_songs_fast/dagRuns"
+    payload = {"conf": {"songs": [song.dict() for song in request.songs]}}
+    response = requests.post(dag_run_url, auth=auth, headers=headers, json=payload)
+    
+    if response.status_code != 200:
+        raise HTTPException(status_code=500, detail=f"Erreur lors du déclenchement du DAG 'dag_songs_fast': {response.text}")
+    
+    return {"message": f"Pipeline rapide chansons déclenché avec succès pour {len(request.songs)} chansons."}

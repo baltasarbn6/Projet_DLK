@@ -6,7 +6,9 @@ import re
 import json
 from datetime import datetime
 from dateutil import parser
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
+# Chargement des variables d'environnement
 load_dotenv(dotenv_path="/opt/airflow/.env")
 
 AWS_ACCESS_KEY_ID = os.getenv("AWS_ACCESS_KEY_ID")
@@ -28,16 +30,18 @@ s3_client = boto3.client(
     region_name=AWS_REGION,
 )
 
-# Connexion à MySQL
-connection = pymysql.connect(
-    host=MYSQL_HOST,
-    user=MYSQL_USER,
-    password=MYSQL_PASSWORD,
-    database=MYSQL_DATABASE,
-    port=MYSQL_PORT,
-    charset="utf8mb4",
-    cursorclass=pymysql.cursors.DictCursor,
-)
+def create_mysql_connection():
+    """Crée une nouvelle connexion MySQL pour chaque thread."""
+    return pymysql.connect(
+        host=MYSQL_HOST,
+        user=MYSQL_USER,
+        password=MYSQL_PASSWORD,
+        database=MYSQL_DATABASE,
+        port=MYSQL_PORT,
+        charset="utf8mb4",
+        cursorclass=pymysql.cursors.DictCursor,
+        autocommit=False,
+    )
 
 def format_release_date(release_date: str) -> str:
     """Formate la date de sortie dans un format compatible MySQL (YYYY-MM-DD)."""
@@ -45,20 +49,16 @@ def format_release_date(release_date: str) -> str:
         return None
 
     try:
-        # Cas où la date est complète (ex: "January 1, 1986")
         parsed_date = parser.parse(release_date, default=datetime(1900, 1, 1))
         return parsed_date.strftime("%Y-%m-%d")
     except Exception as e:
         print(f"Erreur de formatage de la date complète : {release_date} - Erreur : {e}")
     
-    # Cas où la date est sous la forme "October 1997" ou "1997"
     try:
         if re.match(r"^[A-Za-z]+\s\d{4}$", release_date):
-            # Mois + Année (October 1997) -> 1997-10-01
             parsed_date = parser.parse(f"1 {release_date}")
             return parsed_date.strftime("%Y-%m-%d")
         elif re.match(r"^\d{4}$", release_date):
-            # Année uniquement (1997) -> 1997-01-01
             return f"{release_date}-01-01"
     except Exception as e:
         print(f"Erreur de formatage pour date partielle : {release_date} - Erreur : {e}")
@@ -75,10 +75,10 @@ def clean_lyrics(raw_lyrics):
     if not raw_lyrics:
         return "Paroles indisponibles"
     raw_lyrics = re.sub(r"^Paroles\s*:", "", raw_lyrics)
-    raw_lyrics = re.sub(r"\[.*?\]", "", raw_lyrics)  # Retire les balises [Refrain], [Couplet 1]...
+    raw_lyrics = re.sub(r"\[.*?\]", "", raw_lyrics)
     return "\n".join(line.strip() for line in raw_lyrics.split("\n") if line.strip())
 
-def process_file(file_key):
+def process_file(file_key: str):
     """Traite un fichier JSON depuis S3 et insère les données dans MySQL."""
     try:
         response = s3_client.get_object(Bucket=BUCKET_NAME, Key=file_key)
@@ -91,6 +91,8 @@ def process_file(file_key):
     artist_name = data["artist"]["name"]
     bio = data["artist"].get("bio", "Biographie non disponible")
     artist_image_url = data["artist"].get("image_url", "")
+
+    connection = create_mysql_connection()
 
     try:
         with connection.cursor() as cursor:
@@ -142,14 +144,23 @@ def process_file(file_key):
     except Exception as e:
         connection.rollback()
         print(f"Erreur MySQL pour {artist_name} : {e}")
+    finally:
+        connection.close()
 
 def process_all_files():
-    """Parcourt et traite tous les fichiers JSON présents sur S3."""
+    """Parcourt et traite tous les fichiers JSON présents sur S3 en parallèle."""
     files = list_raw_files()
     print(f"Fichiers trouvés : {len(files)}")
-    for file_key in files:
-        print(f"Traitement du fichier : {file_key}")
-        process_file(file_key)
+
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        futures = {executor.submit(process_file, file_key): file_key for file_key in files}
+
+        for future in as_completed(futures):
+            file_key = futures[future]
+            try:
+                future.result()
+            except Exception as e:
+                print(f"Erreur lors du traitement de {file_key} : {e}")
 
 if __name__ == "__main__":
     process_all_files()

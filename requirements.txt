@@ -9,3 +9,7 @@ pymongo
 cryptography
 unidecode
 nltk
+numpy
+tenacity
+lxml
+python-dateutil
