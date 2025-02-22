@@ -117,7 +117,7 @@ def process_song_file(file_key: str):
             url = data.get("url", "")
             image_url = data.get("image_url", "")
             language = data.get("language", "unknown")
-            release_date_raw = data.get("release_date_for_display", None)
+            release_date_raw = data.get("release_date", None)
             release_date = format_release_date(release_date_raw)
             pageviews = data.get("pageviews", 0)
 
@@ -152,7 +152,7 @@ def process_all_songs():
     files = list_song_files()
     print(f"Fichiers trouvés : {len(files)}")
 
-    with ThreadPoolExecutor(max_workers=8) as executor:
+    with ThreadPoolExecutor(max_workers=min(8, len(files))) as executor:
         futures = {executor.submit(process_song_file, file_key): file_key for file_key in files}
         
         for future in as_completed(futures):
