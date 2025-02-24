@@ -8,6 +8,7 @@ import os
 from pydantic import BaseModel
 import requests
 from typing import List
+from bson import ObjectId
 
 load_dotenv(dotenv_path="/opt/api/.env")
 
@@ -67,6 +68,17 @@ class Song(BaseModel):
 class SongRequest(BaseModel):
     songs: List[Song]
 
+def convert_objectid(data):
+    """Convertit les ObjectId en chaînes de caractères dans les documents MongoDB."""
+    if isinstance(data, list):
+        return [convert_objectid(item) for item in data]
+    elif isinstance(data, dict):
+        return {key: convert_objectid(value) for key, value in data.items()}
+    elif isinstance(data, ObjectId):
+        return str(data)
+    else:
+        return data
+
 @app.get("/")
 async def root():
     return {"message": "Bienvenue sur l'API Gateway du projet DLK"}
@@ -77,8 +89,9 @@ async def get_raw_data():
     files = [obj["Key"] for obj in response.get("Contents", [])]
     return {"raw_files": files}
 
-@app.get("/raw/{artist_name}")
+@app.get("/raw/artist/{artist_name}")
 async def get_artist_data(artist_name: str):
+    """Récupère les données brutes de l'artiste depuis S3"""
     key = f"raw/{artist_name.replace(' ', '_').lower()}.json"
     try:
         response = s3_client.get_object(Bucket=BUCKET_NAME, Key=key)
@@ -86,6 +99,17 @@ async def get_artist_data(artist_name: str):
         return {"artist_data": artist_data}
     except Exception as e:
         return {"error": f"Artiste non trouvé ou erreur S3: {str(e)}"}
+
+@app.get("/raw/song/{artist_name}/{song_title}")
+async def get_song_data(artist_name: str, song_title: str):
+    """Récupère les données brutes d'une chanson depuis S3"""
+    key = f"raw/{artist_name.replace(' ', '_').lower()}_{song_title.replace(' ', '_').lower()}.json"
+    try:
+        response = s3_client.get_object(Bucket=BUCKET_NAME, Key=key)
+        song_data = response["Body"].read().decode("utf-8")
+        return {"song_data": song_data}
+    except Exception as e:
+        return {"error": f"Chanson non trouvée ou erreur S3: {str(e)}"}
 
 @app.get("/staging")
 async def get_staging_data():
@@ -114,8 +138,16 @@ async def get_staging_songs():
 
 @app.get("/curated")
 async def get_curated_data():
-    songs = list(mongo_db.songs.find({}, {"_id": 0}))
-    return {"curated_data": songs}
+    # Récupère les deux collections : 'songs' et 'artists'
+    songs = list(mongo_db.songs.find({}))
+    artists = list(mongo_db.artists.find({}))
+
+    return {
+        "curated_data": {
+            "songs": convert_objectid(songs),
+            "artists": convert_objectid(artists)
+        }
+    }
 
 @app.get("/health")
 async def get_health_status():
@@ -150,9 +182,13 @@ async def get_health_status():
 @app.get("/stats")
 async def get_stats():
     response = s3_client.list_objects_v2(Bucket=BUCKET_NAME, Prefix="raw/")
-    s3_file_count = len(response.get("Contents", [])) if "Contents" in response else 0
+    s3_files = response.get("Contents", []) if "Contents" in response else []
+    s3_file_count = len(s3_files)
 
-    # Créer une nouvelle connexion à chaque appel
+    # Calcul de la taille totale des fichiers S3
+    total_s3_size = sum(file["Size"] for file in s3_files)
+
+    # Récupération des stats MySQL
     try:
         connection = pymysql.connect(
             host=MYSQL_HOST,
@@ -178,12 +214,28 @@ async def get_stats():
 
     # Récupération des stats MongoDB
     mongo_songs_count = mongo_db.songs.count_documents({})
-    mongo_artists_count = mongo_db.songs.distinct("artist")
+    mongo_artists_count = mongo_db.artists.count_documents({})
+
+    # Récupération des stats de stockage MongoDB
+    stats = mongo_db.command("collstats", "songs")
+    mongo_storage_size = stats.get("storageSize", 0)
+    mongo_total_size = stats.get("totalSize", 0)
 
     return {
-        "s3_file_count": s3_file_count,
-        "mysql": {"artists_count": mysql_artists_count, "songs_count": mysql_songs_count},
-        "mongodb": {"artists_count": len(mongo_artists_count), "songs_count": mongo_songs_count},
+        "s3": {
+            "file_count": s3_file_count,
+            "total_size_bytes": total_s3_size,
+        },
+        "mysql": {
+            "artists_count": mysql_artists_count,
+            "songs_count": mysql_songs_count
+        },
+        "mongodb": {
+            "artists_count": mongo_artists_count,
+            "songs_count": mongo_songs_count,
+            "storage_size_bytes": mongo_storage_size,
+            "total_size_bytes": mongo_total_size,
+        }
     }
 
 @app.post("/ingest")

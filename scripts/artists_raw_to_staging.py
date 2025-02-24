@@ -6,6 +6,8 @@ import re
 import json
 from datetime import datetime
 from dateutil import parser
+import sys
+from unidecode import unidecode
 
 load_dotenv(dotenv_path="/opt/airflow/.env")
 
@@ -45,37 +47,41 @@ def format_release_date(release_date: str) -> str:
         return None
 
     try:
-        # Cas où la date est complète (ex: "January 1, 1986")
         parsed_date = parser.parse(release_date, default=datetime(1900, 1, 1))
         return parsed_date.strftime("%Y-%m-%d")
     except Exception as e:
         print(f"Erreur de formatage de la date complète : {release_date} - Erreur : {e}")
     
-    # Cas où la date est sous la forme "October 1997" ou "1997"
     try:
         if re.match(r"^[A-Za-z]+\s\d{4}$", release_date):
-            # Mois + Année (October 1997) -> 1997-10-01
             parsed_date = parser.parse(f"1 {release_date}")
             return parsed_date.strftime("%Y-%m-%d")
         elif re.match(r"^\d{4}$", release_date):
-            # Année uniquement (1997) -> 1997-01-01
             return f"{release_date}-01-01"
     except Exception as e:
         print(f"Erreur de formatage pour date partielle : {release_date} - Erreur : {e}")
     
     return None
 
-def list_raw_files():
-    """Liste les fichiers JSON présents dans le bucket S3."""
+def list_files_for_requested_artists(artists):
+    """Liste uniquement les fichiers JSON correspondants aux artistes donnés."""
     response = s3_client.list_objects_v2(Bucket=BUCKET_NAME, Prefix="raw/")
-    return [obj["Key"] for obj in response.get("Contents", []) if obj["Key"].endswith(".json")]
+    all_files = [obj["Key"] for obj in response.get("Contents", []) if obj["Key"].endswith(".json")]
+    
+    target_files = []
+    for artist_name in artists:
+        expected_key = f"raw/{unidecode(artist_name).replace(' ', '_').lower()}.json"
+        if expected_key in all_files:
+            target_files.append(expected_key)
+    
+    return target_files
 
 def clean_lyrics(raw_lyrics):
     """Nettoie les paroles en supprimant les balises et les espaces inutiles."""
     if not raw_lyrics:
         return "Paroles indisponibles"
     raw_lyrics = re.sub(r"^Paroles\s*:", "", raw_lyrics)
-    raw_lyrics = re.sub(r"\[.*?\]", "", raw_lyrics)  # Retire les balises [Refrain], [Couplet 1]...
+    raw_lyrics = re.sub(r"\[.*?\]", "", raw_lyrics)  
     return "\n".join(line.strip() for line in raw_lyrics.split("\n") if line.strip())
 
 def process_file(file_key):
@@ -94,7 +100,6 @@ def process_file(file_key):
 
     try:
         with connection.cursor() as cursor:
-            # Insertion ou mise à jour de l'artiste
             cursor.execute(
                 """
                 INSERT INTO artists (name, bio, image_url) 
@@ -110,7 +115,6 @@ def process_file(file_key):
             cursor.execute("SELECT id FROM artists WHERE name = %s", (artist_name,))
             artist_id = cursor.fetchone()["id"]
 
-            # Insertion des chansons
             for song in data.get("songs", []):
                 title = song.get("title", "Titre inconnu")
                 url = song.get("url", "")
@@ -143,13 +147,14 @@ def process_file(file_key):
         connection.rollback()
         print(f"Erreur MySQL pour {artist_name} : {e}")
 
-def process_all_files():
-    """Parcourt et traite tous les fichiers JSON présents sur S3."""
-    files = list_raw_files()
+def process_all_files(artists):
+    """Parcourt et traite uniquement les fichiers JSON spécifiés par les artistes."""
+    files = list_files_for_requested_artists(artists)
     print(f"Fichiers trouvés : {len(files)}")
     for file_key in files:
         print(f"Traitement du fichier : {file_key}")
         process_file(file_key)
 
 if __name__ == "__main__":
-    process_all_files()
+    artists = sys.argv[1:]
+    process_all_files(artists)

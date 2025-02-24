@@ -14,17 +14,27 @@ def run_upload_songs_to_s3(**kwargs):
         raise ValueError("Aucune chanson fournie pour l'ingestion")
 
     song_args = [item for song in songs for item in [song["title"], song["artist"]]]
-
-    # Exécuter le script en passant tous les titres et artistes
     subprocess.run(["python", f"{SCRIPT_PATH}/upload_songs_to_s3.py"] + song_args, check=True)
 
-def run_songs_raw_to_staging():
-    """Appelle le script songs_raw_to_staging.py"""
-    subprocess.run(["python", f"{SCRIPT_PATH}/songs_raw_to_staging.py"], check=True)
+def run_songs_raw_to_staging(**kwargs):
+    """Appelle le script songs_raw_to_staging.py avec les chansons spécifiées."""
+    songs = kwargs.get('dag_run').conf.get('songs', [])
 
-def run_staging_to_curated():
-    """Appelle le script staging_to_curated.py"""
-    subprocess.run(["python", f"{SCRIPT_PATH}/staging_to_curated.py"], check=True)
+    if not songs:
+        raise ValueError("Aucune chanson fournie pour l'étape de staging")
+
+    song_args = [item for song in songs for item in [song["title"], song["artist"]]]
+    subprocess.run(["python", f"{SCRIPT_PATH}/songs_raw_to_staging.py"] + song_args, check=True)
+
+def run_songs_staging_to_curated(**kwargs):
+    """Appelle le script songs_staging_to_curated.py avec les chansons spécifiées."""
+    songs = kwargs.get('dag_run').conf.get('songs', [])
+
+    if not songs:
+        raise ValueError("Aucune chanson fournie pour la migration vers MongoDB")
+
+    song_args = [item for song in songs for item in [song["title"], song["artist"]]]
+    subprocess.run(["python", f"{SCRIPT_PATH}/songs_staging_to_curated.py"] + song_args, check=True)
 
 # Configuration du DAG
 default_args = {
@@ -56,12 +66,14 @@ task_song_s3 = PythonOperator(
 task_song_mysql = PythonOperator(
     task_id='songs_raw_to_staging',
     python_callable=run_songs_raw_to_staging,
+    provide_context=True,
     dag=dag,
 )
 
 task_song_mongo = PythonOperator(
-    task_id='staging_to_curated',
-    python_callable=run_staging_to_curated,
+    task_id='songs_staging_to_curated',
+    python_callable=run_songs_staging_to_curated,
+    provide_context=True,
     dag=dag,
 )
 

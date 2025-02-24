@@ -7,6 +7,8 @@ from dotenv import load_dotenv
 from datetime import datetime
 from dateutil import parser
 from concurrent.futures import ThreadPoolExecutor, as_completed
+import sys
+from unidecode import unidecode
 
 # Chargement des variables d'environnement
 load_dotenv(dotenv_path="/opt/airflow/.env")
@@ -49,13 +51,11 @@ def format_release_date(release_date: str) -> str:
         return None
 
     try:
-        # Cas où la date est complète (ex: "January 1, 1986")
         parsed_date = parser.parse(release_date, default=datetime(1900, 1, 1))
         return parsed_date.strftime("%Y-%m-%d")
     except Exception as e:
         print(f"Erreur de formatage de la date complète : {release_date} - Erreur : {e}")
     
-    # Cas où la date est sous la forme "October 1997" ou "1997"
     try:
         if re.match(r"^[A-Za-z]+\s\d{4}$", release_date):
             parsed_date = parser.parse(f"1 {release_date}")
@@ -75,11 +75,20 @@ def clean_lyrics(raw_lyrics: str) -> str:
     raw_lyrics = re.sub(r"\[.*?\]", "", raw_lyrics)
     return "\n".join(line.strip() for line in raw_lyrics.split("\n") if line.strip())
 
-def list_song_files() -> list:
-    """Liste uniquement les fichiers de chansons depuis S3."""
+def list_files_for_requested_songs(songs: list) -> list:
+    """Liste uniquement les fichiers JSON correspondants aux chansons demandées."""
     response = s3_client.list_objects_v2(Bucket=BUCKET_NAME, Prefix="raw/")
-    files = response.get("Contents", [])
-    return [obj["Key"] for obj in files if obj["Key"].endswith(".json")]
+    all_files = [obj["Key"] for obj in response.get("Contents", []) if obj["Key"].endswith(".json")]
+    
+    target_files = []
+    for song in songs:
+        safe_title = unidecode(song["title"]).replace(" ", "_").lower()
+        safe_artist = unidecode(song["artist"]).replace(" ", "_").lower()
+        expected_key = f"raw/{safe_artist}_{safe_title}.json"
+        if expected_key in all_files:
+            target_files.append(expected_key)
+    
+    return target_files
 
 def process_song_file(file_key: str):
     """Lit et insère un fichier JSON de chanson dans MySQL."""
@@ -147,9 +156,9 @@ def process_song_file(file_key: str):
     finally:
         connection.close()
 
-def process_all_songs():
-    """Parcourt tous les fichiers de chansons et les insère dans MySQL en multithreading."""
-    files = list_song_files()
+def process_all_songs(songs: list):
+    """Parcourt les fichiers JSON spécifiés sur S3 en multithreading."""
+    files = list_files_for_requested_songs(songs)
     print(f"Fichiers trouvés : {len(files)}")
 
     with ThreadPoolExecutor(max_workers=min(8, len(files))) as executor:
@@ -163,4 +172,9 @@ def process_all_songs():
                 print(f"Erreur lors du traitement de {file_key} : {e}")
 
 if __name__ == "__main__":
-    process_all_songs()
+    if len(sys.argv) < 3 or len(sys.argv) % 2 == 0:
+        print("Usage : python songs_raw_to_staging_fast.py <title1> <artist1> [<title2> <artist2> ...]")
+        sys.exit(1)
+    
+    songs = [{"title": sys.argv[i], "artist": sys.argv[i + 1]} for i in range(1, len(sys.argv), 2)]
+    process_all_songs(songs)

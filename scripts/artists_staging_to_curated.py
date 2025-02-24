@@ -4,16 +4,18 @@ import os
 from dotenv import load_dotenv
 from random import seed, sample
 from datetime import date
-import nltk
+import sys
 from nltk.corpus import stopwords
+import nltk
+from pymongo import ReplaceOne
+
+# Initialisation
+seed(42)
+nltk.download("stopwords")
+STOP_WORDS = set(stopwords.words("french"))
 
 # Charger les variables d'environnement
 load_dotenv(dotenv_path="/opt/airflow/.env")
-seed(42)
-
-# Télécharger les stopwords français si nécessaire
-nltk.download("stopwords")
-STOP_WORDS = set(stopwords.words("french"))
 
 # Configuration MySQL
 MYSQL_HOST = os.getenv("MYSQL_HOST")
@@ -41,10 +43,8 @@ mysql_connection = pymysql.connect(
 mongo_client = pymongo.MongoClient(MONGO_URI)
 mongo_db = mongo_client[MONGO_DATABASE]
 
+
 def generate_difficulty_versions(lyrics, easy_pct=10, medium_pct=25, hard_pct=40):
-    """
-    Génère trois versions de paroles (facile, intermédiaire, difficile) en masquant un pourcentage de mots.
-    """
     if not lyrics:
         return {"easy": "Paroles indisponibles", "medium": "Paroles indisponibles", "hard": "Paroles indisponibles"}
 
@@ -61,43 +61,60 @@ def generate_difficulty_versions(lyrics, easy_pct=10, medium_pct=25, hard_pct=40
 
     return {"easy": easy, "medium": medium, "hard": hard}
 
-def migrate_to_mongodb():
-    """
-    Migre les données depuis MySQL vers MongoDB avec un document par chanson,
-    incluant les données de l'artiste et les paroles traduites en français si disponibles.
-    """
-    with mysql_connection.cursor() as cursor:
-        # Récupération des artistes
-        cursor.execute("SELECT * FROM artists")
-        artists = {artist["id"]: artist for artist in cursor.fetchall()}
 
-        # Récupération des chansons
-        cursor.execute("SELECT * FROM songs")
+def migrate_to_mongodb(artists):
+    with mysql_connection.cursor() as cursor:
+        formatted_artists = ','.join(['%s'] * len(artists))
+        cursor.execute(f"SELECT * FROM artists WHERE name IN ({formatted_artists})", artists)
+        artists_data = cursor.fetchall()
+
+        if not artists_data:
+            print("Aucun artiste correspondant trouvé dans MySQL.")
+            return
+
+        # Insertion ou mise à jour des artistes dans MongoDB
+        artist_operations = []
+        for artist in artists_data:
+            artist_doc = {
+                "name": artist["name"],
+                "bio": artist.get("bio", "Biographie non disponible"),
+                "image_url": artist.get("image_url", ""),
+            }
+            artist_operations.append(
+                ReplaceOne(
+                    {"name": artist_doc["name"]},
+                    artist_doc,
+                    upsert=True
+                )
+            )
+
+        if artist_operations:
+            mongo_db.artists.bulk_write(artist_operations, ordered=False)
+            print(f"Artistes insérés ou mis à jour : {len(artist_operations)}")
+
+        # Récupération des chansons liées aux artistes
+        artist_ids = [artist["id"] for artist in artists_data]
+        cursor.execute(f"SELECT * FROM songs WHERE artist_id IN ({','.join(map(str, artist_ids))})")
         songs = cursor.fetchall()
 
+        song_operations = []
         for song in songs:
-            artist = artists.get(song["artist_id"])
+            artist = next((a for a in artists_data if a["id"] == song["artist_id"]), None)
             if not artist:
                 continue
 
-            # Récupération des données de l'artiste
-            artist_name = artist["name"]
-            artist_bio = artist["bio"] if artist["bio"] else "Biographie non disponible"
-            artist_image_url = artist["image_url"] if artist["image_url"] else ""
+            # Récupérer l'ID de l'artiste depuis MongoDB
+            artist_mongo = mongo_db.artists.find_one({"name": artist["name"]})
+            if not artist_mongo:
+                continue
 
-            # Récupération des données de la chanson
             lyrics = song.get("lyrics", "")
             french_lyrics = song.get("french_lyrics", "")
             difficulty_versions = generate_difficulty_versions(lyrics)
 
-            # Création du document complet
             song_doc = {
                 "title": song["title"],
-                "artist": {
-                    "name": artist_name,
-                    "bio": artist_bio,
-                    "image_url": artist_image_url
-                },
+                "artist_id": artist_mongo["_id"],
                 "url": song["url"],
                 "image_url": song["image_url"],
                 "language": song["language"],
@@ -108,14 +125,21 @@ def migrate_to_mongodb():
                 "french_lyrics": french_lyrics if french_lyrics else ""
             }
 
-            mongo_db.songs.replace_one(
-                {"title": song["title"], "artist.name": artist_name},
-                song_doc,
-                upsert=True
+            song_operations.append(
+                ReplaceOne(
+                    {"title": song["title"], "artist_id": artist_mongo["_id"]},
+                    song_doc,
+                    upsert=True
+                )
             )
-            print(f"Chanson insérée : {song['title']} ({artist_name})")
+
+        if song_operations:
+            mongo_db.songs.bulk_write(song_operations, ordered=False)
+            print(f"Chansons insérées ou mises à jour : {len(song_operations)}")
 
     print("Migration complète vers MongoDB !")
 
+
 if __name__ == "__main__":
-    migrate_to_mongodb()
+    artists = sys.argv[1:]
+    migrate_to_mongodb(artists)

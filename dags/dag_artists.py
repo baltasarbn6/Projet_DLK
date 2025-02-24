@@ -13,13 +13,13 @@ def run_upload_artists_to_s3(**kwargs):
         raise ValueError("Aucun artiste fourni pour l'ingestion")
     subprocess.run(["python", f"{SCRIPT_PATH}/upload_artists_to_s3.py"] + artists, check=True)
 
-def run_artists_raw_to_staging():
-    """Appelle le script artists_raw_to_staging.py"""
-    subprocess.run(["python", f"{SCRIPT_PATH}/artists_raw_to_staging.py"], check=True)
+def run_artists_raw_to_staging(**kwargs):
+    artists = kwargs.get('dag_run').conf.get('artists', [])
+    subprocess.run(["python", f"{SCRIPT_PATH}/artists_raw_to_staging.py"] + artists, check=True)
 
-def run_staging_to_curated():
-    """Appelle le script staging_to_curated.py"""
-    subprocess.run(["python", f"{SCRIPT_PATH}/staging_to_curated.py"], check=True)
+def run_artists_staging_to_curated(**kwargs):
+    artists = kwargs.get('dag_run').conf.get('artists', [])
+    subprocess.run(["python", f"{SCRIPT_PATH}/artists_staging_to_curated.py"] + artists, check=True)
 
 # Configuration du DAG
 default_args = {
@@ -55,8 +55,8 @@ task2 = PythonOperator(
 )
 
 task3 = PythonOperator(
-    task_id='staging_to_curated',
-    python_callable=run_staging_to_curated,
+    task_id='artists_staging_to_curated',
+    python_callable=run_artists_staging_to_curated,
     dag=dag,
 )
 

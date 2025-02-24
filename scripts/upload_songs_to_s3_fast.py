@@ -2,12 +2,16 @@ import requests
 import boto3
 import json
 import os
+import logging
 from bs4 import BeautifulSoup
 from dotenv import load_dotenv
 from unidecode import unidecode
 import sys
 from concurrent.futures import ThreadPoolExecutor
 from requests.adapters import HTTPAdapter, Retry
+
+# Utiliser le logger Airflow pour éviter les conflits de logs
+logger = logging.getLogger("airflow.task")
 
 # Charger les variables d'environnement
 load_dotenv(dotenv_path="/opt/airflow/.env")
@@ -48,12 +52,12 @@ s3_client = boto3.client(
 def request_genius(endpoint, params=None):
     """Effectue une requête à l'API Genius avec gestion des erreurs et des retries."""
     try:
-        print(f"[API] Requête vers : {endpoint} avec paramètres : {params}")
+        logger.info(f"[API] Requête vers : {endpoint} avec paramètres : {params}")
         response = api_session.get(f"{BASE_URL}{endpoint}", params=params, timeout=30)
         response.raise_for_status()
         return response.json()
     except requests.exceptions.RequestException as e:
-        print(f"Erreur lors de la requête API : {e}")
+        logger.error(f"Erreur lors de la requête API : {e}")
         return None
 
 def get_song_details_by_title_and_artist(song_title, artist_name):
@@ -71,6 +75,7 @@ def get_song_details_by_title_and_artist(song_title, artist_name):
             song_id = song["id"]
             return request_genius(f"/songs/{song_id}")["response"]["song"]
     
+    logger.warning(f"Chanson introuvable : {song_title} par {artist_name}")
     return None
 
 def get_artist_details(artist_id):
@@ -95,7 +100,7 @@ def get_artist_details(artist_id):
 def get_song_lyrics(song_url):
     """Scrape les paroles d'une chanson depuis Genius avec gestion des erreurs."""
     try:
-        print(f"Scraping des paroles depuis : {song_url}")
+        logger.info(f"Scraping des paroles depuis : {song_url}")
         response = lyrics_session.get(song_url, timeout=30)
         response.raise_for_status()
         soup = BeautifulSoup(response.text, "html.parser")
@@ -103,14 +108,14 @@ def get_song_lyrics(song_url):
         lyrics = "\n".join(div.get_text(separator="\n") for div in lyrics_divs)
         return lyrics.strip() if lyrics else "Paroles indisponibles"
     except Exception as e:
-        print(f"Erreur lors du scraping des paroles : {e}")
+        logger.error(f"Erreur lors du scraping des paroles : {e}")
         return "Paroles indisponibles"
 
 def upload_song_to_s3(song_title, artist_name):
     """Récupère les détails d'une chanson spécifique et les téléverse sur S3."""
     song_data = get_song_details_by_title_and_artist(song_title, artist_name)
     if not song_data:
-        print(f"Chanson introuvable : {song_title} par {artist_name}")
+        logger.warning(f"Chanson introuvable : {song_title} par {artist_name}")
         return
 
     artist_info = get_artist_details(song_data["primary_artist"]["id"])
@@ -124,11 +129,7 @@ def upload_song_to_s3(song_title, artist_name):
 
     song_info = {
         "title": song_data["title"],
-        "artist": {
-            "name": artist_info["name"],
-            "image_url": artist_info["image_url"],
-            "bio": artist_info["bio"]
-        },
+        "artist": artist_info,
         "url": song_data["url"],
         "image_url": song_data["song_art_image_url"],
         "language": song_data.get("language", "unknown"),
@@ -138,9 +139,7 @@ def upload_song_to_s3(song_title, artist_name):
         "french_lyrics": french_lyrics
     }
 
-    safe_title = unidecode(song_title).replace(" ", "_").lower()
-    safe_artist = unidecode(artist_name).replace(" ", "_").lower()
-    s3_key = f"raw/{safe_artist}_{safe_title}.json"
+    s3_key = f"raw/{unidecode(artist_name).replace(' ', '_').lower()}_{unidecode(song_title).replace(' ', '_').lower()}.json"
 
     try:
         s3_client.put_object(
@@ -149,9 +148,9 @@ def upload_song_to_s3(song_title, artist_name):
             Body=json.dumps(song_info, ensure_ascii=False, indent=4).encode("utf-8"),
             ContentType="application/json"
         )
-        print(f"Téléversé sur S3 : {song_title} - {artist_name}")
+        logger.info(f"Téléversé sur S3 : {s3_key}")
     except Exception as e:
-        print(f"Erreur lors du téléversement sur S3 : {e}")
+        logger.error(f"Erreur lors du téléversement sur S3 : {e}")
 
 def process_songs_in_parallel(songs):
     """Traite les chansons en parallèle avec ThreadPoolExecutor."""

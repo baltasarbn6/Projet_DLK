@@ -4,13 +4,14 @@ import os
 from dotenv import load_dotenv
 from random import seed
 from datetime import date
+import sys
 import numpy as np
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import nltk
 from nltk.corpus import stopwords
 from pymongo import ReplaceOne
 
-# Configuration aléatoire et chargement des stopwords
+# Initialisation
 seed(42)
 nltk.download("stopwords")
 STOP_WORDS = set(stopwords.words("french"))
@@ -65,17 +66,46 @@ def generate_difficulty_versions(lyrics, easy_pct=10, medium_pct=25, hard_pct=40
         "hard": "\n".join(mask_words(line, hard_pct, STOP_WORDS) for line in lyrics.splitlines()),
     }
 
-def process_song(song, artist):
-    """Prépare un document MongoDB à partir d'une chanson MySQL."""
+def fetch_songs_from_mysql(songs: list):
+    """Récupère uniquement les chansons spécifiées depuis MySQL."""
+    connection = create_mysql_connection()
+    try:
+        with connection.cursor() as cursor:
+            formatted_titles = ','.join(['%s'] * len(songs))
+            query = f"""
+                SELECT songs.*, artists.name AS artist_name, artists.bio AS artist_bio, artists.image_url AS artist_image_url
+                FROM songs 
+                LEFT JOIN artists ON songs.artist_id = artists.id
+                WHERE CONCAT(artists.name, ' - ', songs.title) IN ({formatted_titles})
+            """
+            formatted_songs = [f"{song['artist']} - {song['title']}" for song in songs]
+            cursor.execute(query, formatted_songs)
+            return cursor.fetchall()
+    finally:
+        connection.close()
+
+def process_song(song, mongo_db):
+    """Prépare et insère le document MongoDB pour une chanson spécifique."""
     difficulty_versions = generate_difficulty_versions(song.get("lyrics", ""))
 
-    return {
+    artist_doc = {
+        "name": song["artist_name"],
+        "bio": song.get("artist_bio", "Biographie non disponible"),
+        "image_url": song.get("artist_image_url", ""),
+    }
+
+    # Insertion ou mise à jour de l'artiste dans MongoDB
+    artist_result = mongo_db.artists.find_one_and_update(
+        {"name": artist_doc["name"]},
+        {"$set": artist_doc},
+        upsert=True,
+        return_document=pymongo.ReturnDocument.AFTER
+    )
+
+    # Préparation du document de la chanson pour MongoDB
+    song_doc = {
         "title": song["title"],
-        "artist": {
-            "name": artist["name"],
-            "bio": artist.get("bio", "Biographie non disponible"),
-            "image_url": artist.get("image_url", ""),
-        },
+        "artist_id": artist_result["_id"],
         "url": song["url"],
         "image_url": song["image_url"],
         "language": song["language"],
@@ -86,70 +116,40 @@ def process_song(song, artist):
         "french_lyrics": song.get("french_lyrics", ""),
     }
 
-def fetch_songs_from_mysql(batch_size=500):
-    """Récupère les données de MySQL par lot pour éviter la surcharge mémoire."""
-    connection = create_mysql_connection()
-    try:
-        with connection.cursor() as cursor:
-            cursor.execute("SELECT COUNT(*) as total FROM songs")
-            total_songs = cursor.fetchone()["total"]
-            print(f"Nombre total de chansons : {total_songs}")
+    return song_doc
 
-            for offset in range(0, total_songs, batch_size):
-                cursor.execute(f"""
-                    SELECT songs.*, artists.name AS artist_name, artists.bio AS artist_bio, artists.image_url AS artist_image_url
-                    FROM songs 
-                    LEFT JOIN artists ON songs.artist_id = artists.id
-                    LIMIT {batch_size} OFFSET {offset}
-                """)
-                yield cursor.fetchall()
-    finally:
-        connection.close()
-
-def insert_into_mongodb(documents, mongo_db):
-    """Insertion optimisée en masse dans MongoDB avec gestion des duplications."""
-    if not documents:
-        return
-
-    try:
-        bulk_operations = [
-            ReplaceOne(
-                {"title": doc["title"], "artist.name": doc["artist"]["name"]},
-                doc,
-                upsert=True
-            ) for doc in documents
-        ]
-
-        result = mongo_db.songs.bulk_write(bulk_operations, ordered=False)
-        print(f"Insertion MongoDB : {len(documents)} documents (insertés : {result.upserted_count}, mis à jour : {result.modified_count})")
-    except Exception as e:
-        print(f"Erreur lors de l'insertion dans MongoDB : {e}")
-
-def migrate_to_mongodb(batch_size=500):
-    """Migre les données depuis MySQL vers MongoDB en parallèle avec optimisation."""
+def migrate_songs_to_mongodb(songs: list):
+    """Migre uniquement les chansons spécifiées vers MongoDB avec optimisation."""
     mongo_db = create_mongo_client()
+    songs_data = fetch_songs_from_mysql(songs)
 
-    for batch in fetch_songs_from_mysql(batch_size):
-        print(f"Traitement d'un lot de {len(batch)} chansons")
-        documents = []
+    documents = []
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        futures = {executor.submit(process_song, song, mongo_db): song for song in songs_data}
 
-        with ThreadPoolExecutor(max_workers=8) as executor:
-            futures = {
-                executor.submit(process_song, song, {
-                    "name": song["artist_name"],
-                    "bio": song["artist_bio"],
-                    "image_url": song["artist_image_url"]
-                }): song for song in batch
-            }
+        for future in as_completed(futures):
+            result = future.result()
+            if result:
+                documents.append(result)
 
-            for future in as_completed(futures):
-                result = future.result()
-                if result:
-                    documents.append(result)
-
-        insert_into_mongodb(documents, mongo_db)
-
-    print("Migration complète vers MongoDB !")
+    if documents:
+        try:
+            bulk_operations = [
+                ReplaceOne(
+                    {"title": doc["title"], "artist_id": doc["artist_id"]},
+                    doc,
+                    upsert=True
+                ) for doc in documents
+            ]
+            result = mongo_db.songs.bulk_write(bulk_operations, ordered=False)
+            print(f"MongoDB : {len(documents)} chansons (insertées : {result.upserted_count}, mises à jour : {result.modified_count})")
+        except Exception as e:
+            print(f"Erreur lors de l'insertion dans MongoDB : {e}")
 
 if __name__ == "__main__":
-    migrate_to_mongodb(batch_size=500)
+    if len(sys.argv) < 3 or len(sys.argv) % 2 == 0:
+        print("Usage : python songs_staging_to_curated_fast.py <title1> <artist1> [<title2> <artist2> ...]")
+        sys.exit(1)
+
+    songs = [{"title": sys.argv[i], "artist": sys.argv[i + 1]} for i in range(1, len(sys.argv), 2)]
+    migrate_songs_to_mongodb(songs)

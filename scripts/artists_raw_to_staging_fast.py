@@ -7,6 +7,8 @@ import json
 from datetime import datetime
 from dateutil import parser
 from concurrent.futures import ThreadPoolExecutor, as_completed
+import sys
+from unidecode import unidecode
 
 # Chargement des variables d'environnement
 load_dotenv(dotenv_path="/opt/airflow/.env")
@@ -65,10 +67,18 @@ def format_release_date(release_date: str) -> str:
     
     return None
 
-def list_raw_files():
-    """Liste les fichiers JSON présents dans le bucket S3."""
+def list_files_for_requested_artists(artists):
+    """Liste uniquement les fichiers JSON correspondants aux artistes demandés."""
     response = s3_client.list_objects_v2(Bucket=BUCKET_NAME, Prefix="raw/")
-    return [obj["Key"] for obj in response.get("Contents", []) if obj["Key"].endswith(".json")]
+    all_files = [obj["Key"] for obj in response.get("Contents", []) if obj["Key"].endswith(".json")]
+    
+    target_files = []
+    for artist_name in artists:
+        expected_key = f"raw/{unidecode(artist_name).replace(' ', '_').lower()}.json"
+        if expected_key in all_files:
+            target_files.append(expected_key)
+    
+    return target_files
 
 def clean_lyrics(raw_lyrics):
     """Nettoie les paroles en supprimant les balises et les espaces inutiles."""
@@ -147,9 +157,9 @@ def process_file(file_key: str):
     finally:
         connection.close()
 
-def process_all_files():
-    """Parcourt et traite tous les fichiers JSON présents sur S3 en parallèle."""
-    files = list_raw_files()
+def process_all_files(artists):
+    """Parcourt et traite les fichiers JSON spécifiés sur S3 en parallèle."""
+    files = list_files_for_requested_artists(artists)
     print(f"Fichiers trouvés : {len(files)}")
 
     with ThreadPoolExecutor(max_workers=8) as executor:
@@ -163,4 +173,5 @@ def process_all_files():
                 print(f"Erreur lors du traitement de {file_key} : {e}")
 
 if __name__ == "__main__":
-    process_all_files()
+    artists = sys.argv[1:]
+    process_all_files(artists)
