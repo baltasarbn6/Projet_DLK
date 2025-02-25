@@ -36,19 +36,22 @@ Le projet utilise trois principales couches de stockage :
 git clone https://github.com/baltasarbn6/Projet_DLK.git
 cd Projet_DLK
 ```
+2. **Copier les variables d'environnement :**
 
-2. **Démarrer les services Docker :**
+Assurez-vous que le fichier `.env` est présent à la **racine** du projet ainsi que dans le dossier **/api**.
+
+3. **Démarrer les services Docker :**
 ```bash
 docker-compose up --build
 ```
 
-3. **Installer les dépendances du frontend :**
+4. **Installer les dépendances du frontend :**
 ```bash
 cd frontend
 npm install
 ```
 
-4. **Lancer le frontend en mode développement :**
+5. **Lancer le frontend en mode développement :**
 ```bash
 npm run dev
 ```
@@ -65,31 +68,35 @@ npm run dev
 
 ### **Récupération des données brutes depuis S3 :**
 ```http
-http://localhost:8000/raw
-http://localhost:8000/raw/artist/{artist_name}
-http://localhost:8000/raw/song/{artist_name}/{song_title}
+GET http://localhost:8000/raw
+
+GET http://localhost:8000/raw/artist/{artist_name}
+
+GET http://localhost:8000/raw/song/{artist_name}/{song_title}
 ```
 
 ### **Récupération des données en staging depuis MySQL :**
 ```http
-http://localhost:8000/staging
-http://localhost:8000/staging/artists
-http://localhost:8000/staging/songs
+GET http://localhost:8000/staging
+
+GET http://localhost:8000/staging/artists
+
+GET http://localhost:8000/staging/songs
 ```
 
 ### **Récupération des données en curated depuis MongoDB :**
 ```http
-http://localhost:8000/curated
+GET http://localhost:8000/curated
 ```
 
 ### **Vérification de la santé des services :**
 ```http
-http://localhost:8000/health
+GET http://localhost:8000/health
 ```
 
 ### **Statistiques sur les données stockées :**
 ```http
-http://localhost:8000/stats
+GET http://localhost:8000/stats
 ```
 
 ---
