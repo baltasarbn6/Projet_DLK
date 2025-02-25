@@ -19,9 +19,10 @@ export default function RandomExtractGame() {
   // 🔍 Charger les données
   useEffect(() => {
     axios.get("http://localhost:8000/curated").then((response) => {
-      const songs = response.data.curated_data;
-      const uniqueArtists = [...new Set(songs.map((song) => song.artist.name))];
+      const { songs, artists } = response.data.curated_data;
+      const uniqueArtists = artists.map((artist) => artist.name);
       setAllArtists(uniqueArtists);
+
       const titles = songs.map((song) => song.title);
       setAllTitles(titles);
     });
@@ -47,8 +48,19 @@ export default function RandomExtractGame() {
     setGameFinished(false);
 
     axios.get("http://localhost:8000/curated").then((response) => {
-      const allSongs = response.data.curated_data.filter(
-        (song) => song.artist.name === artist
+      const { songs, artists } = response.data.curated_data;
+
+      // Récupérer l'artiste correspondant
+      const matchedArtist = artists.find((a) => a.name === artist);
+
+      if (!matchedArtist) {
+        alert("Artiste introuvable.");
+        return;
+      }
+
+      // Filtrer les chansons associées à cet artiste via artist_id
+      const allSongs = songs.filter(
+        (song) => song.artist_id === matchedArtist._id
       );
 
       let randomExcerpts = [];
@@ -61,8 +73,12 @@ export default function RandomExtractGame() {
           seenTitles.add(song.title);
           const lyrics = song.lyrics.split("\n");
           if (lyrics.length >= 5) {
-            const randomLine = Math.floor(Math.random() * Math.max(lyrics.length - 5, 1));
-            const excerpt = lyrics.slice(randomLine, randomLine + 5).join("\n");
+            const randomLine = Math.floor(
+              Math.random() * Math.max(lyrics.length - 5, 1)
+            );
+            const excerpt = lyrics
+              .slice(randomLine, randomLine + 5)
+              .join("\n");
             randomExcerpts.push({ excerpt, title: song.title });
           }
         }
@@ -153,7 +169,9 @@ export default function RandomExtractGame() {
         <div className="game-play">
           {lyricsData.length > 0 && currentIndex < lyricsData.length && (
             <div className="question-block">
-              <pre className="lyrics-excerpt">🎶 {lyricsData[currentIndex].excerpt}</pre>
+              <pre className="lyrics-excerpt">
+                🎶 {lyricsData[currentIndex].excerpt}
+              </pre>
               <input
                 type="text"
                 value={userInput}

@@ -18,14 +18,25 @@ export default function DecadeLanguageGame() {
   // Charger toutes les chansons au démarrage
   useEffect(() => {
     axios.get('http://localhost:8000/curated').then(response => {
-      setAllSongs(response.data.curated_data); // Stocker toutes les chansons de la base
+      const { songs, artists } = response.data.curated_data;
+      
+      // Associer chaque chanson à son artiste via artist_id
+      const enrichedSongs = songs.map(song => {
+        const artist = artists.find(a => a._id === song.artist_id);
+        return {
+          ...song,
+          artistName: artist ? artist.name : "Artiste inconnu"
+        };
+      });
+
+      setAllSongs(enrichedSongs); // Stocker toutes les chansons enrichies de la base
     }).catch(error => console.error('Erreur de récupération des données :', error));
   }, []);
 
   // Récupérer les chansons filtrées par décennie, langue, et avec une date de sortie valide
   const startGame = () => {
     const filteredSongs = allSongs.filter(song => {
-      if (!song.release_date) return false; // Exclure les chansons sans date de sortie
+      if (!song.release_date || song.release_date === "unknown") return false;
       const releaseYear = new Date(song.release_date).getFullYear();
       const decadeStart = parseInt(decade);
       return (

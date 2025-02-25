@@ -8,12 +8,25 @@ export default function ArtistList() {
   const query = searchParams.get("search");
 
   useEffect(() => {
-    axios.get("http://localhost:8000/curated").then((response) => {
-      const filteredArtists = response.data.curated_data.filter(song =>
-        song.artist.toLowerCase().includes(query.toLowerCase())
-      ).map(song => song.artist);
-      setArtists([...new Set(filteredArtists)]);
-    });
+    if (query) {
+      axios.get("http://localhost:8000/curated").then((response) => {
+        const { artists } = response.data.curated_data;
+
+        // Filtrer les artistes en fonction du query
+        const filteredArtists = artists
+          .filter((artist) =>
+            artist.name.toLowerCase().includes(query.toLowerCase())
+          )
+          .map((artist) => ({
+            name: artist.name,
+            image_url: artist.image_url,
+          }));
+
+        setArtists(filteredArtists);
+      }).catch((error) => {
+        console.error("Erreur lors de la récupération des données :", error);
+      });
+    }
   }, [query]);
 
   return (
@@ -21,8 +34,15 @@ export default function ArtistList() {
       <h2>Résultats pour "{query}"</h2>
       <ul className="artist-list">
         {artists.map((artist) => (
-          <li key={artist}>
-            <Link to={`/songs?search=${encodeURIComponent(artist)}`}>{artist}</Link>
+          <li key={artist.name} className="artist-item">
+            <Link to={`/songs?search=${encodeURIComponent(artist.name)}`}>
+              <img
+                src={artist.image_url}
+                alt={artist.name}
+                className="artist-image"
+              />
+              {artist.name}
+            </Link>
           </li>
         ))}
       </ul>

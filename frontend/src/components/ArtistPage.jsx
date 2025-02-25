@@ -7,26 +7,39 @@ export default function ArtistPage() {
   const [artist, setArtist] = useState(null);
 
   useEffect(() => {
-    axios.get("http://localhost:8000/curated")
-      .then(response => {
-        const songs = response.data.curated_data;
-        const artistSongs = songs.filter(song => song.artist.name === artistName);
-        if (artistSongs.length > 0) {
-          const { name, bio, image_url } = artistSongs[0].artist;
-          const artistInfo = {
-            name,
-            bio,
-            image_url,
-            songs: artistSongs.map(song => ({
+    axios
+      .get("http://localhost:8000/curated")
+      .then((response) => {
+        const { songs, artists } = response.data.curated_data;
+
+        // Trouver l'artiste dans la collection artists
+        const matchedArtist = artists.find(
+          (artist) => artist.name === artistName
+        );
+
+        if (matchedArtist) {
+          // Récupérer les chansons associées à cet artiste via artist_id
+          const artistSongs = songs
+            .filter((song) => song.artist_id === matchedArtist._id)
+            .map((song) => ({
               title: song.title,
               release_date: song.release_date,
-              image_url: song.image_url
-            }))
+              image_url: song.image_url,
+            }));
+
+          const artistInfo = {
+            name: matchedArtist.name,
+            bio: matchedArtist.bio,
+            image_url: matchedArtist.image_url,
+            songs: artistSongs,
           };
+
           setArtist(artistInfo);
         }
       })
-      .catch(error => console.error("Erreur de récupération des données :", error));
+      .catch((error) =>
+        console.error("Erreur de récupération des données :", error)
+      );
   }, [artistName]);
 
   if (!artist) return <div>Chargement...</div>;
@@ -35,11 +48,17 @@ export default function ArtistPage() {
     <div className="artist-container">
       {/* En-tête avec nom et photo */}
       <div className="artist-header">
-        <img src={artist.image_url} alt={artist.name} className="artist-image" />
+        <img
+          src={artist.image_url}
+          alt={artist.name}
+          className="artist-image"
+        />
         <div className="artist-info">
           <h2>{artist.name}</h2>
           {/* Afficher la bio uniquement si elle n'est pas "." */}
-          {artist.bio !== "." && <p className="artist-bio">{artist.bio}</p>}
+          {artist.bio !== "." && (
+            <p className="artist-bio">{artist.bio}</p>
+          )}
         </div>
       </div>
 
@@ -48,11 +67,18 @@ export default function ArtistPage() {
         {artist.songs.map((song, index) => (
           <li key={index} className="song-item">
             <div className="song-info">
-              <Link to={`/song/${encodeURIComponent(song.title)}`} className="song-link">
+              <Link
+                to={`/song/${encodeURIComponent(song.title)}`}
+                className="song-link"
+              >
                 {song.title}
               </Link>
             </div>
-            <img src={song.image_url} alt={song.title} className="song-image-right" />
+            <img
+              src={song.image_url}
+              alt={song.title}
+              className="song-image-right"
+            />
           </li>
         ))}
       </ul>

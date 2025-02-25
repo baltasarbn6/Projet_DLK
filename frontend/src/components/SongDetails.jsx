@@ -12,7 +12,27 @@ export default function SongDetails() {
 
   useEffect(() => {
     axios.get("http://localhost:8000/curated").then((response) => {
-      setSong(response.data.curated_data.find((s) => s.title === title) || null);
+      const { songs, artists } = response.data.curated_data;
+
+      // Trouver la chanson correspondant au titre
+      const matchedSong = songs.find((s) => s.title === title);
+
+      if (matchedSong) {
+        // Récupérer les données de l'artiste via artist_id
+        const artist = artists.find((a) => a._id === matchedSong.artist_id) || {
+          name: "Artiste inconnu",
+          bio: "Biographie non disponible",
+          image_url: "",
+        };
+
+        // Enrichir les données de la chanson avec l'artiste
+        setSong({
+          ...matchedSong,
+          artist,
+        });
+      }
+    }).catch((error) => {
+      console.error("Erreur lors de la récupération des données :", error);
     });
   }, [title]);
 
@@ -25,9 +45,9 @@ export default function SongDetails() {
   };
 
   const descriptions = {
-    facile: "Trouvez les paroles manquantes dans des extraits simples.",
+    easy: "Trouvez les paroles manquantes dans des extraits simples.",
     medium: "Trouvez les paroles manquantes dans des extraits de difficulté moyenne.",
-    difficile: "Trouvez les paroles manquantes dans des extraits complexes."
+    hard: "Trouvez les paroles manquantes dans des extraits complexes.",
   };
 
   return (
@@ -35,39 +55,50 @@ export default function SongDetails() {
       <div className="song-header">
         <img src={song.image_url} alt={song.title} className="song-image" />
         <div className="song-info">
-          <h2 className="song-title">{song.title} - {song.artist.name}</h2>
-          <p className="release-date">📅 {new Date(song.release_date).toLocaleDateString('fr-FR')}</p>
+          <h2 className="song-title">
+            {song.title} - {song.artist.name}
+          </h2>
+          <p className="release-date">
+            📅{" "}
+            {song.release_date !== "unknown"
+              ? new Date(song.release_date).toLocaleDateString("fr-FR")
+              : "Date inconnue"}
+          </p>
         </div>
       </div>
       {!showLyrics && (
-  <div className="difficulty-selection">
-    <select
-      className="difficulty-dropdown"
-      value={difficulty}
-      onChange={(e) => {
-        setDifficulty(e.target.value);
-        setShowLyrics(false);
-      }}
-    >
-      <option value="">Sélectionner une difficulté</option>
-      {Object.keys(song.difficulty_versions).map((level) => (
-        <option key={level} value={level}>
-          {level.charAt(0).toUpperCase() + level.slice(1)}
-        </option>
-      ))}
-    </select>
-    {difficulty && (
-      <div className="difficulty-description">
-        {descriptions[difficulty.toLowerCase()] || "Description non disponible."}
-      </div>
-    )}
-    {difficulty && !showLyrics && (
-      <button className="play-button" onClick={() => setShowLyrics(true)}>
-        Jouer
-      </button>
-    )}
-  </div>
-)}
+        <div className="difficulty-selection">
+          <select
+            className="difficulty-dropdown"
+            value={difficulty}
+            onChange={(e) => {
+              setDifficulty(e.target.value);
+              setShowLyrics(false);
+            }}
+          >
+            <option value="">Sélectionner une difficulté</option>
+            {Object.keys(song.difficulty_versions).map((level) => (
+              <option key={level} value={level}>
+                {level.charAt(0).toUpperCase() + level.slice(1)}
+              </option>
+            ))}
+          </select>
+          {difficulty && (
+            <div className="difficulty-description">
+              {descriptions[difficulty.toLowerCase()] ||
+                "Description non disponible."}
+            </div>
+          )}
+          {difficulty && !showLyrics && (
+            <button
+              className="play-button"
+              onClick={() => setShowLyrics(true)}
+            >
+              Jouer
+            </button>
+          )}
+        </div>
+      )}
 
       {showLyrics && (
         <div className="lyrics-container">
@@ -79,7 +110,9 @@ export default function SongDetails() {
                     key={i}
                     type="text"
                     value={userAnswers[`${index}-${i}`] || ""}
-                    onChange={(e) => handleChange(`${index}-${i}`, e.target.value)}
+                    onChange={(e) =>
+                      handleChange(`${index}-${i}`, e.target.value)
+                    }
                     className="word-input"
                   />
                 ) : (
@@ -90,7 +123,11 @@ export default function SongDetails() {
           ))}
           <button
             className="finish-button"
-            onClick={() => navigate("/result", { state: { userAnswers, song, difficulty } })}
+            onClick={() =>
+              navigate("/result", {
+                state: { userAnswers, song, difficulty },
+              })
+            }
           >
             Fin du jeu
           </button>

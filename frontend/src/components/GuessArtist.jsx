@@ -13,15 +13,18 @@ export default function GuessArtistGame() {
   // Charger aléatoirement les paroles d'un seul artiste
   useEffect(() => {
     axios.get('http://localhost:8000/curated').then(response => {
-      const allSongs = response.data.curated_data;
+      const { songs, artists } = response.data.curated_data;
       const groupedByArtist = {};
 
-      // Grouper les chansons par artiste
-      allSongs.forEach(song => {
-        const artistName = song.artist.name;
+      // Grouper les chansons par artiste via artist_id
+      songs.forEach(song => {
+        const artistData = artists.find(artist => artist._id === song.artist_id);
+        const artistName = artistData ? artistData.name : "Artiste inconnu";
+        
         if (!groupedByArtist[artistName]) {
           groupedByArtist[artistName] = [];
         }
+
         const lines = song.lyrics.split('\n').filter(line => line.trim() !== '');
         groupedByArtist[artistName].push(...lines);
       });
@@ -45,7 +48,8 @@ export default function GuessArtistGame() {
     setInput(query);
     if (query.length > 1) {
       axios.get('http://localhost:8000/curated').then(response => {
-        const allArtists = [...new Set(response.data.curated_data.map(song => song.artist.name))];
+        const { artists } = response.data.curated_data;
+        const allArtists = artists.map(artist => artist.name);
         const filtered = allArtists.filter(artist => artist.toLowerCase().includes(query.toLowerCase()));
         setArtistSuggestions(filtered.slice(0, 5));
       });
