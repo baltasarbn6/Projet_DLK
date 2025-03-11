@@ -114,6 +114,7 @@ L'ingestion et la transformation des données sont orchestrées à l'aide de **D
 
 - **Docker & Docker Compose** : Assurez-vous que Docker est installé.
 - **Node.js & npm** : Pour lancer le frontend React.
+- **Attention** : Le lancement peut échouer si les scripts `init_scheduler.sh` et `init_webserver.sh` sont en **CRLF** au lieu de **LF**. Il faut changer ça avant de lancer la commande docker.  
 
 ### Étapes
 
