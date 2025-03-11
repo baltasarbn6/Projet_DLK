@@ -88,23 +88,23 @@ export default function Home() {
           className="home-button"
           onClick={() => navigate("/random-game")}
         >
-          🎯 Jeu d'extraits aléatoires
+          🎯 Jeu 1 : Retrouvez les titres d'un artiste
         </button>
         <button
           className="home-button"
           onClick={() => navigate("/guess-artist")}
         >
-          🎤 Devinez l'artiste
+          🎤 Jeu 2 : Retrouvez un artiste par ses titres
         </button>
         <button
           className="home-button"
           onClick={() => navigate("/game/decade-language")}
         >
-          📅 Jeu par décennie/langue
+          📅 Jeu 3 : Retrouvez des titres par décennie et langue
         </button>
         <button className="home-button"
         onClick={() => navigate("/game/translation-game")}
-        >🌍 Traduction mystère</button>
+        >🌍 Jeu 4 : Retrouvez un titre grâce à sa traduction</button>
       </div>
 
       <ul className="result-list">

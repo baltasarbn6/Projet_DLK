@@ -45,9 +45,9 @@ export default function SongDetails() {
   };
 
   const descriptions = {
-    easy: "Trouvez les paroles manquantes dans des extraits simples.",
-    medium: "Trouvez les paroles manquantes dans des extraits de difficulté moyenne.",
-    hard: "Trouvez les paroles manquantes dans des extraits complexes.",
+    easy: "Trouvez 10% des paroles manquantes dans la chanson.",
+    medium: "Trouvez 25% des paroles manquantes dans la chanson.",
+    hard: "Trouvez 40% des paroles manquantes dans la chanson.",
   };
 
   return (

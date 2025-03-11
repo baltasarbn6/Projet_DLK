@@ -4,30 +4,23 @@
 
 ## 📋 Description
 
-Le frontend de **Lyrics Challenge** est une application web interactive permettant de tester ses connaissances musicales à travers différents jeux et fonctionnalités. Développée en **React**, l'application propose une interface moderne et intuitive pour naviguer entre les différentes sections du jeu.
+**Lyrics Challenge** est une application web interactive permettant de tester ses connaissances musicales à travers différents jeux et fonctionnalités. Développée en **React**, l'application propose une interface moderne et intuitive pour naviguer entre les différentes sections du jeu.
 
 ## 🚀 Fonctionnalités
 
-### 🏠 **Accueil**
-- **Recherche en direct** : Permet de rechercher des chansons ou des artistes en tapant un mot-clé.
-- **Jeux disponibles** :
-  - 🎯 **Jeu d'extraits aléatoires** : Devinez la chanson à partir d'un extrait de paroles.
-  - 🎤 **Devinez l'artiste** : Identifiez l'artiste en fonction des paroles.
-  - 📅 **Jeu par décennie/langue** : Testez vos connaissances musicales en filtrant par période et langue.
-  - 🌍 **Traduction mystère** : Retrouvez le titre original de chansons traduites en français.
+- **Recherche dynamique** : Permet de rechercher des chansons ou des artistes en tapant un mot-clé.
 
-### 🎶 **Détails des chansons**
-- Affiche les informations détaillées sur une chanson, ses paroles originales et traduites (si disponibles).
-- Possibilité de jouer à différents niveaux de difficulté en complétant les paroles manquantes.
+- **Jeu principal** : Après avoir séléctionné une chanson via la barre de recherche, votre but est de compléter les paroles de la chanson. Vous aurez la possibilité de jouer à différents niveaux de difficulté.
+
+- **Autres jeux disponibles** :
+  - 🎯 **Retrouvez les titres d'un artiste** : Devinez les titres d'un artiste à partir d'un extrait de paroles.
+  - 🎤 **Retrouvez un artiste par ses titres** : Identifiez l'artiste en fonction d'extraits de paroles.
+  - 📅 **Retrouvez des titres par décennie et langue** : Testez vos connaissances musicales en filtrant par période et langue.
+  - 🌍 **Retrouvez un titre grâce à sa traduction** : Retrouvez les titres originaux de chansons traduites en français.
 
 ### 👨‍🎤 **Liste des artistes**
 - Recherche d'artistes avec suggestions automatiques.
 - Accès rapide à toutes les chansons disponibles d'un artiste.
-
-### 🌍 **Jeu de Traduction Mystère**
-- 10 chansons avec traductions françaises sont proposées.
-- Le but est de retrouver le titre original (anglais ou autre) en se basant sur la traduction.
-- Chaque extrait contient 15 lignes de paroles traduites.
 
 ## 🛠️ **Installation**
 
@@ -38,7 +31,7 @@ Le frontend de **Lyrics Challenge** est une application web interactive permetta
 ### Installation
 ```bash
 # Cloner le dépôt
-git clone https://github.com/baltasarbn6/Projet_DLK.git
+Cette étape est réalisé
 
 # Se déplacer dans le répertoire du projet
 cd frontend
@@ -62,5 +55,3 @@ http://localhost:5173
 
 ## 🤝 **Contribuer**
 Les contributions sont les bienvenues ! N'hésitez pas à ouvrir une **issue** ou une **pull request** sur le dépôt GitHub.
-
-

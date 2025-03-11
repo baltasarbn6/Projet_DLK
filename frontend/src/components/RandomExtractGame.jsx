@@ -142,8 +142,8 @@ export default function RandomExtractGame() {
     <div className="random-game-container">
       {!gameStarted && !gameFinished ? (
         <div className="artist-selection">
-          <h2>🎯 Jeu d'extraits aléatoires</h2>
-          <h3>🔍 Tapez un nom d'artiste :</h3>
+          <h2>🎯 Retrouvez les titres d'un artiste</h2>
+          <h3>Dans ce jeu, vous choisissez un artiste et devez deviner le titre de chaque extrait de chanson proposé. Un extrait est composé de 5 lignes de paroles tirées de la chanson. Une seule tentative par chanson. Bonne chance !</h3>
           <input
             type="text"
             value={artistInput}

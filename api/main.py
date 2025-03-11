@@ -113,6 +113,7 @@ async def get_song_data(artist_name: str, song_title: str):
 
 @app.get("/staging")
 async def get_staging_data():
+    """Récupère les données depuis le MySQL"""
     with mysql_connection.cursor() as cursor:
         cursor.execute("SELECT * FROM artists")
         artists = cursor.fetchall()
@@ -138,7 +139,6 @@ async def get_staging_songs():
 
 @app.get("/curated")
 async def get_curated_data():
-    # Récupère les deux collections : 'songs' et 'artists'
     songs = list(mongo_db.songs.find({}))
     artists = list(mongo_db.artists.find({}))
 
@@ -148,6 +148,18 @@ async def get_curated_data():
             "artists": convert_objectid(artists)
         }
     }
+
+@app.get("/curated/artists")
+async def get_curated_artists():
+    """Récupère les artistes stockés dans MongoDB."""
+    artists = list(mongo_db.artists.find({}, {"_id": 0}))
+    return {"artists": artists}
+
+@app.get("/curated/songs")
+async def get_curated_songs():
+    """Récupère les chansons stockées dans MongoDB."""
+    songs = list(mongo_db.songs.find({}, {"_id": 0}))
+    return {"songs": convert_objectid(songs)}
 
 @app.get("/health")
 async def get_health_status():
@@ -238,6 +250,53 @@ async def get_stats():
         }
     }
 
+@app.delete("/delete_all")
+async def delete_all():
+    """Supprime toutes les données des bases MySQL, MongoDB et S3."""
+    try:
+        await delete_mysql()
+        await delete_mongo()
+        await delete_s3()
+        return {"message": "Toutes les données ont été supprimées avec succès de MySQL, MongoDB et S3."}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Erreur lors de la suppression des données: {str(e)}")
+
+@app.delete("/delete_mysql")
+async def delete_mysql():
+    """Supprime toutes les données de MySQL."""
+    try:
+        with mysql_connection.cursor() as cursor:
+            cursor.execute("DELETE FROM songs")
+            cursor.execute("DELETE FROM artists")
+            mysql_connection.commit()
+        return {"message": "Toutes les données ont été supprimées de MySQL."}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Erreur lors de la suppression des données MySQL: {str(e)}")
+
+@app.delete("/delete_mongo")
+async def delete_mongo():
+    """Supprime toutes les données de MongoDB."""
+    try:
+        mongo_db.songs.drop()
+        mongo_db.artists.drop()
+        mongo_db.command("compact", "songs")
+        mongo_db.command("compact", "artists")
+        return {"message": "Toutes les données ont été supprimées de MongoDB et les collections ont été droppées."}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Erreur lors de la suppression des données MongoDB: {str(e)}")
+
+@app.delete("/delete_s3")
+async def delete_s3():
+    """Supprime tous les fichiers du bucket S3."""
+    try:
+        response = s3_client.list_objects_v2(Bucket=BUCKET_NAME)
+        if "Contents" in response:
+            objects_to_delete = [{"Key": obj["Key"]} for obj in response["Contents"]]
+            s3_client.delete_objects(Bucket=BUCKET_NAME, Delete={"Objects": objects_to_delete})
+        return {"message": "Tous les fichiers ont été supprimés du bucket S3."}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Erreur lors de la suppression des fichiers S3: {str(e)}")
+
 @app.post("/ingest")
 async def ingest_data(request: ArtistRequest):
     """Déclenche le pipeline d'ingestion basé sur les artistes."""
@@ -306,7 +365,7 @@ async def ingest_songs(request: SongRequest):
 
 @app.post("/ingest_fast")
 async def ingest_fast(request: ArtistRequest):
-    """Déclenche le pipeline d'ingestion rapide basé sur les artistes avec unpause automatique du DAG."""
+    """Déclenche le pipeline d'ingestion rapide basé sur les artistes."""
     if not request.artists:
         raise HTTPException(status_code=400, detail="Liste d'artistes vide")
 
@@ -339,7 +398,7 @@ async def ingest_fast(request: ArtistRequest):
 
 @app.post("/ingest_songs_fast")
 async def ingest_songs(request: SongRequest):
-    """Déclenche le pipeline d'ingestion basé sur les chansons."""
+    """Déclenche le pipeline d'ingestion rapide basé sur les chansons."""
     if not request.songs:
         raise HTTPException(status_code=400, detail="Liste de chansons vide")
     

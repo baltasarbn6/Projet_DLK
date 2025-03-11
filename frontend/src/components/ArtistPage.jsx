@@ -55,10 +55,6 @@ export default function ArtistPage() {
         />
         <div className="artist-info">
           <h2>{artist.name}</h2>
-          {/* Afficher la bio uniquement si elle n'est pas "." */}
-          {artist.bio !== "." && (
-            <p className="artist-bio">{artist.bio}</p>
-          )}
         </div>
       </div>
 

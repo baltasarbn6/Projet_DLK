@@ -9,6 +9,7 @@ export default function MysteryTranslationGame() {
   const [suggestions, setSuggestions] = useState([]);
   const [score, setScore] = useState(0);
   const [gameOver, setGameOver] = useState(false);
+  const [gameAvailable, setGameAvailable] = useState(true);
 
   useEffect(() => {
     axios.get('http://localhost:8000/curated').then((response) => {
@@ -18,6 +19,11 @@ export default function MysteryTranslationGame() {
       const translatedSongs = songs.filter(
         (song) => song.french_lyrics && song.french_lyrics !== 'Paroles indisponibles' && song.language !== 'fr'
       );
+
+      if (translatedSongs.length < 10) {
+        setGameAvailable(false);
+        return;
+      }
 
       // Sélectionner 10 chansons de manière aléatoire
       const shuffledSongs = translatedSongs.sort(() => 0.5 - Math.random()).slice(0, 10);
@@ -78,6 +84,10 @@ export default function MysteryTranslationGame() {
     }
   };
 
+  if (!gameAvailable) {
+    return <div className="random-game-container"><h2>🚫 Jeu indisponible</h2><p>Pas assez de chansons avec des traductions disponibles. Si vous voulez jouer, merci d'injecter de nouveaux artistes et/ou chansons.</p></div>;
+  }
+
   return (
     <div className="random-game-container">
       {gameOver ? (
@@ -88,7 +98,8 @@ export default function MysteryTranslationGame() {
         </>
       ) : (
         <>
-          <h2>🌍 Jeu de Traduction Mystère</h2>
+          <h2>🌍 Retrouvez un titre grâce à sa traduction</h2>
+          <h3>Dans ce jeu, vous devez retrouver le titre original d’une chanson à partir d’un extrait traduit en français. Il y a 10 titres à retrouver. Vous avez une seule tentative par titre pour deviner correctement. Bonne chance !</h3>
           <div className="lyrics-excerpt">
             <p>🎶 Extrait traduit en français :</p>
             {currentLyrics.map((line, index) => (

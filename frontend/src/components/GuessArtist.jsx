@@ -105,7 +105,7 @@ export default function GuessArtistGame() {
   if (gameOver) {
     return (
       <div className="random-game-container">
-        <h2>🎤 Jeu Devinez l'artiste</h2>
+        <h2>🎤 Retrouvez un artiste par ses titres</h2>
         <p>✅ Artiste correct : {artist}</p>
         <p>❌ Erreurs : {score.errors}</p>
         <button className="restart-button" onClick={() => window.location.reload()}>🔄 Rejouer</button>
@@ -115,7 +115,8 @@ export default function GuessArtistGame() {
 
   return (
     <div className="random-game-container">
-      <h2>🎤 Jeu Devinez l'artiste</h2>
+      <h2>🎤 Retrouvez un artiste par ses titres</h2>
+      <h3>Dans ce jeu, vous devez retrouver l’artiste à partir d’un extrait d’une ligne de l’une de ses chansons. Si vous ne trouvez pas, vous pouvez passer à un autre extrait. Moins vous avez besoin d'extraits pour deviner, plus votre score sera élevé. Bonne chance !</h3>
       <div className="lyrics-excerpt">
         🎶 {currentLine}
       </div>

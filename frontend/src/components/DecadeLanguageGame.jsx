@@ -137,7 +137,8 @@ export default function DecadeLanguageGame() {
     <div className="random-game-container">
       {!gameStarted ? (
         <>
-          <h2>📅 Jeu par décennie/langue</h2>
+          <h2>📅 Retrouvez des titres par décennie et langue</h2>
+          <h3>Dans ce jeu, vous choisissez une décennie et une langue, puis devez deviner le titre de chaque chanson aléatoire proposée (qui respectent vos critères de séléction). Chaque extrait est composé de 5 lignes de paroles tirées de la chanson. Une seule tentative par chanson. Bonne chance !</h3>
           <label>
             🕒 Décennie :
             <select value={decade} onChange={(e) => setDecade(e.target.value)}>
@@ -169,7 +170,7 @@ export default function DecadeLanguageGame() {
         </>
       ) : (
         <>
-          <h2>📅 Jeu par décennie/langue</h2>
+          <h2>📅 Retrouvez des titres par décennie et langue</h2>
           <div className="lyrics-excerpt">
             <p>🎶 Extrait de la chanson :</p>
             {currentLyrics.map((line, index) => (
