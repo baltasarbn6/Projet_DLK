@@ -120,7 +120,6 @@ L'ingestion et la transformation des données sont orchestrées à l'aide de **D
 1. **Cloner le dépôt dans un dossier vierge:**
 ```bash
 git clone https://github.com/baltasarbn6/Projet_DLK.git
-cd Projet_DLK
 ```
 
 2. **Aller à la racine du projet :**
@@ -237,6 +236,28 @@ curl -X POST http://localhost:8000/ingest_fast -H 'Content-Type: application/jso
 curl -X POST http://localhost:8000/ingest_songs_fast -H 'Content-Type: application/json' -d '{"songs": [{"title": "title1", "artist": "artist1"}, {"title": "title2", "artist": "artist2"}, ...]}'
 ```
 
+### **Exemple de curl pour test avec 1 élèment pour /ingest ou /ingest_fast :**
+```bash
+curl -X POST "http://localhost:8000/ingest" -H "Content-Type: application/json" -d '{"artists": ["Aya Nakamura"]}'
+
+curl -X POST "http://localhost:8000/ingest_fast" -H "Content-Type: application/json" -d '{"artists": ["Aya Nakamura"]}'
+
+curl -X POST "http://localhost:8000/ingest" -H "Content-Type: application/json" -d '{"artists": ["The Beatles"]}'
+
+curl -X POST "http://localhost:8000/ingest_fast" -H "Content-Type: application/json" -d '{"artists": ["The Beatles"]}'
+```
+
+### **Exemple de curl pour test avec 10 élèments pour /ingest ou /ingest_fast :**
+```bash
+curl -X POST "http://localhost:8000/ingest" -H "Content-Type: application/json" -d '{"artists": ["Christophe Maé","Florent Pagny","Johnny Hallyday","Daniel Balavoine","Booba","Francis Cabrel","Jean-Jacques Goldman","Stromae","Louane","Céline Dion"]}'
+
+curl -X POST "http://localhost:8000/ingest_fast" -H "Content-Type: application/json" -d '{"artists": ["Christophe Maé","Florent Pagny","Johnny Hallyday","Daniel Balavoine","Booba","Francis Cabrel","Jean-Jacques Goldman","Stromae","Louane","Céline Dion"]}'
+
+curl -X POST "http://localhost:8000/ingest" -H "Content-Type: application/json" -d '{"artists": ["Indochine","Mylène Farmer","Patrick Bruel","Zazie","Lorie","Garou","Vianney","Drake","Taylor Swift","The Weeknd"]}'
+
+curl -X POST "http://localhost:8000/ingest_fast" -H "Content-Type: application/json" -d '{"artists": ["Indochine","Mylène Farmer","Patrick Bruel","Zazie","Lorie","Garou","Vianney","Drake","Taylor Swift","The Weeknd"]}'
+```
+
 ---
 
 ## Résultats d'ingestion et comparaison des performances
@@ -282,7 +303,7 @@ La version `dag_artists_fast` offre une accélération significative de l'ingest
 ---
 
 ## Remarques
-- Assurez-vous de bien copier le fichier `env` de Moodle et de la renommer en `.env`.
+- Assurez-vous de bien copier le fichier `env` de Moodle et de le renommer en `.env`.
 - Avant chaque nouvelle exécution, vérifiez que tous les conteneurs Docker sont bien opérationnels avec `docker ps`.
 - Il faut attendre la fin de démarrage du webserver de Airflow avant de démarrer les ingestions.
 - Pour voir ce qui n'a pas été trouvé dans Genius (peut-être un problème d'écriture d'un artiste ou d'une chanson), il faut remonter les logs du Scheduler.
